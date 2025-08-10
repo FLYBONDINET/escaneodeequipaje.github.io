@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Control de Valijas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; text-align: center; }
+  #video-container { width: 100%; max-width: 400px; margin: auto; }
+  video { width: 100%; border: 2px solid #333; }
+  table { margin: 20px auto; border-collapse: collapse; width: 90%; }
+  th, td { border: 1px solid #ccc; padding: 5px; }
+</style>
+</head>
+<body>
+
+<h2>Escaneo de Valijas</h2>
+<p>Vuelo: <input type="text" id="vuelo" placeholder="Ej: AR1234"></p>
+<div id="video-container"></div>
+<h3>Total valijas: <span id="contador">0</span></h3>
+<table>
+  <thead><tr><th>#</th><th>Código</th></tr></thead>
+  <tbody id="lista"></tbody>
+</table>
+
+<script>
+let codigos = new Set();
+let contador = 0;
+const endpoint = "URL_DE_TU_APP_SCRIPT"; // <-- Pega aquí la URL pública del Apps Script
+
+Quagga.init({
+    inputStream: {
+        name: "Live",
+        type: "LiveStream",
+        target: document.querySelector('#video-container'),
+        constraints: { facingMode: "environment" }
+    },
+    decoder: { readers: ["code_128_reader", "ean_reader", "ean_8_reader"] }
+}, function(err) {
+    if (err) { console.error(err); return; }
+    Quagga.start();
+});
+
+Quagga.onDetected(function(result) {
+    const codigo = result.codeResult.code;
+    const vuelo = document.getElementById("vuelo").value.trim();
+
+    if (!vuelo) {
+        alert("Ingrese el número de vuelo antes de escanear.");
+        return;
+    }
+    if (!codigos.has(codigo)) {
+        codigos.add(codigo);
+        contador++;
+        document.getElementById("contador").innerText = contador;
+
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${contador}</td><td>${codigo}</td>`;
+        document.getElementById("lista").appendChild(row);
+
+        // Enviar a Google Sheets
+        fetch(endpoint, {https://script.google.com/macros/s/AKfycbzQH6WipQZb7krjpmYTuqNKlbEasYf_9d0o70NscaRlEjnwior8Q1X7aB5-gD6b5qhN/exec
+            method: "POST",
+            body: JSON.stringify({ vuelo, codigo })
+        }).then(r => r.json()).then(res => {
+            console.log("Guardado en Sheets:", res);
+        });
+    }
+});
+</script>
+
+</body>
+</html>
