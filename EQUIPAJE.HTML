@@ -1,73 +1,88 @@
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>Control de Valijas</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-<style>
-  body { font-family: Arial, sans-serif; text-align: center; }
-  #video-container { width: 100%; max-width: 400px; margin: auto; }
-  video { width: 100%; border: 2px solid #333; }
-  table { margin: 20px auto; border-collapse: collapse; width: 90%; }
-  th, td { border: 1px solid #ccc; padding: 5px; }
-</style>
+  <meta charset="UTF-8">
+  <title>Escáner de Valijas</title>
+  <style>
+    body { font-family: Arial; text-align: center; margin: 20px; }
+    video { width: 100%; max-width: 400px; border: 2px solid #ccc; margin: 10px 0; }
+    #listado { margin-top: 20px; text-align: left; display: inline-block; }
+    #contador { font-weight: bold; margin: 10px 0; }
+    input, button { padding: 10px; margin: 5px; }
+  </style>
 </head>
 <body>
+  <h2>📦 Escáner de Valijas</h2>
+  <label>Número de vuelo:</label>
+  <input type="text" id="vuelo" placeholder="Ej: AR1234"><br>
+  <button id="startScan">Iniciar Escaneo</button>
+  <br>
+  <video id="video" autoplay playsinline></video>
 
-<h2>Escaneo de Valijas</h2>
-<p>Vuelo: <input type="text" id="vuelo" placeholder="Ej: AR1234"></p>
-<div id="video-container"></div>
-<h3>Total valijas: <span id="contador">0</span></h3>
-<table>
-  <thead><tr><th>#</th><th>Código</th></tr></thead>
-  <tbody id="lista"></tbody>
-</table>
+  <h3>Listado</h3>
+  <div id="contador">Total: 0</div>
+  <ul id="listado"></ul>
 
-<script>
-let codigos = new Set();
-let contador = 0;
-const endpoint = "URL_DE_TU_APP_SCRIPT"; // <-- Pega aquí la URL pública del Apps Script
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script>
+    const listado = [];
+    const listadoElem = document.getElementById('listado');
+    const contadorElem = document.getElementById('contador');
+    const videoElem = document.getElementById('video');
 
-Quagga.init({
-    inputStream: {
-        name: "Live",
-        type: "LiveStream",
-        target: document.querySelector('#video-container'),
-        constraints: { facingMode: "environment" }
-    },
-    decoder: { readers: ["code_128_reader", "ean_reader", "ean_8_reader"] }
-}, function(err) {
-    if (err) { console.error(err); return; }
-    Quagga.start();
-});
-
-Quagga.onDetected(function(result) {
-    const codigo = result.codeResult.code;
-    const vuelo = document.getElementById("vuelo").value.trim();
-
-    if (!vuelo) {
-        alert("Ingrese el número de vuelo antes de escanear.");
+    document.getElementById('startScan').addEventListener('click', () => {
+      const vuelo = document.getElementById('vuelo').value.trim();
+      if (!vuelo) {
+        alert("Ingrese número de vuelo");
         return;
-    }
-    if (!codigos.has(codigo)) {
-        codigos.add(codigo);
-        contador++;
-        document.getElementById("contador").innerText = contador;
+      }
+      iniciarScanner(vuelo);
+    });
 
-        const row = document.createElement("tr");
-        row.innerHTML = `<td>${contador}</td><td>${codigo}</td>`;
-        document.getElementById("lista").appendChild(row);
-
-        // Enviar a Google Sheets
-        fetch(endpoint, {https://script.google.com/macros/s/AKfycbzQH6WipQZb7krjpmYTuqNKlbEasYf_9d0o70NscaRlEjnwior8Q1X7aB5-gD6b5qhN/exec
-            method: "POST",
-            body: JSON.stringify({ vuelo, codigo })
-        }).then(r => r.json()).then(res => {
-            console.log("Guardado en Sheets:", res);
+    async function iniciarScanner(vuelo) {
+      try {
+        // Abre la cámara trasera
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
         });
-    }
-});
-</script>
+        videoElem.srcObject = stream;
 
+        // Lector ZXing
+        const codeReader = new ZXing.BrowserMultiFormatReader();
+        codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
+          if (result) {
+            const codigo = result.text.trim();
+            if (listado.includes(codigo)) {
+              alert("⚠ Código repetido: " + codigo);
+            } else {
+              listado.push(codigo);
+              agregarFila(codigo);
+              enviarDatos(vuelo, codigo);
+            }
+          }
+        });
+      } catch (error) {
+        alert("Error al acceder a la cámara: " + error);
+      }
+    }
+
+    function agregarFila(codigo) {
+      const li = document.createElement('li');
+      li.textContent = codigo;
+      listadoElem.appendChild(li);
+      contadorElem.textContent = "Total: " + listado.length;
+    }
+
+    function enviarDatos(vuelo, codigo) {
+      fetch("https://script.google.com/macros/s/AKfycbzQH6WipQZb7krjpmYTuqNKlbEasYf_9d0o70NscaRlEjnwior8Q1X7aB5-gD6b5qhN/exec", {
+        method: "POST",
+        body: JSON.stringify({ vuelo: vuelo, codigo: codigo }),
+        headers: { "Content-Type": "application/json" }
+      })
+      .then(r => r.text())
+      .then(res => console.log("Guardado:", res))
+      .catch(err => console.error("Error:", err));
+    }
+  </script>
 </body>
 </html>
