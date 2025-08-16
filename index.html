@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Escáner de Valijas</title>
+  <title>📦 Plataforma Escáner de Valijas</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -13,25 +13,49 @@
       flex-direction: column;
       align-items: center;
       box-sizing: border-box;
-      background: #f9f9f9;
+      background: #f4f6f9;
       min-height: 100vh;
     }
     h2 {
-      margin-bottom: 10px;
+      margin-bottom: 20px;
+      color: #2c3e50;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 700px;
+      width: 100%;
+      margin-bottom: 20px;
     }
     label {
       font-weight: bold;
+      margin-bottom: 5px;
+      display: inline-block;
     }
     input, button {
       padding: 10px;
-      margin: 5px;
+      margin: 5px 0;
       font-size: 1rem;
-      border-radius: 5px;
+      border-radius: 6px;
       border: 1px solid #ccc;
+      width: 100%;
+      box-sizing: border-box;
     }
+    button {
+      cursor: pointer;
+      border: none;
+      font-weight: bold;
+    }
+    .btn-primary { background: #3498db; color: white; }
+    .btn-primary:hover { background: #2980b9; }
+    .btn-secondary { background: #95a5a6; color: white; }
+    .btn-secondary:hover { background: #7f8c8d; }
+    .btn-success { background: #27ae60; color: white; }
+    .btn-success:hover { background: #1e8449; }
     #video {
       width: 100%;
-      max-width: 600px;
       aspect-ratio: 16 / 9;
       border: 2px solid #ccc;
       border-radius: 8px;
@@ -40,55 +64,51 @@
       object-fit: cover;
     }
     #listado {
-      max-width: 600px;
-      width: 100%;
-      text-align: left;
-      padding-left: 20px;
       max-height: 200px;
       overflow-y: auto;
-      background: white;
+      background: #fafafa;
       border-radius: 8px;
-      box-shadow: 0 0 6px rgba(0,0,0,0.1);
+      padding: 10px;
+      border: 1px solid #ddd;
+    }
+    #listado li {
+      padding: 6px;
+      border-bottom: 1px solid #eee;
     }
     #contador {
       font-weight: bold;
       margin: 10px 0;
     }
-    #controls {
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-      width: 100%;
-      max-width: 600px;
-    }
-    @media (max-width: 480px) {
-      input, button {
-        width: 100%;
-        box-sizing: border-box;
-      }
-      #controls {
-        flex-direction: column;
-        align-items: center;
-      }
-    }
   </style>
 </head>
 <body>
-  <h2>📦 Escáner de Valijas</h2>
-  <div id="controls">
-    <label for="vuelo">Número de vuelo:</label>
+  <h2>📦 Plataforma Escáner de Valijas</h2>
+
+  <div class="card">
+    <label for="vuelo">✈️ Número de vuelo:</label>
     <input type="text" id="vuelo" placeholder="Ej: AR1234" autocomplete="off" />
-    <button id="startScan">Iniciar Escaneo</button>
-    <button id="toggleFlash" disabled>Linterna 🔦</button>
+
+    <button id="startScan" class="btn-primary">Iniciar Escaneo</button>
+    <button id="toggleFlash" class="btn-secondary" disabled>Linterna 🔦</button>
   </div>
 
-  <video id="video" autoplay playsinline></video>
+  <div class="card">
+    <video id="video" autoplay playsinline></video>
+  </div>
 
-  <h3>Listado</h3>
-  <div id="contador">Total: 0</div>
-  <ul id="listado"></ul>
+  <div class="card">
+    <h3>📋 Listado</h3>
+    <div id="contador">Total: 0</div>
+    <ul id="listado"></ul>
+    <hr>
+    <label for="manualCodigo">➕ Ingresar código manual:</label>
+    <input type="text" id="manualCodigo" placeholder="Escriba o pegue código de valija" />
+    <button id="agregarManual" class="btn-secondary">Agregar Manualmente</button>
+  </div>
+
+  <div class="card">
+    <button id="finalizar" class="btn-success">✅ Finalizar</button>
+  </div>
 
   <script src="https://unpkg.com/@zxing/library@latest"></script>
   <script>
@@ -98,10 +118,15 @@
     const videoElem = document.getElementById('video');
     const startScanBtn = document.getElementById('startScan');
     const toggleFlashBtn = document.getElementById('toggleFlash');
+    const manualInput = document.getElementById('manualCodigo');
+    const manualBtn = document.getElementById('agregarManual');
+    const finalizarBtn = document.getElementById('finalizar');
+    
     let codeReader = null;
     let stream = null;
     let track = null;
     let torchOn = false;
+    let vueloActivo = "";
 
     startScanBtn.addEventListener('click', async () => {
       const vuelo = document.getElementById('vuelo').value.trim();
@@ -109,14 +134,33 @@
         alert("Ingrese número de vuelo");
         return;
       }
-      if (codeReader) {
-        // Si ya está corriendo, reiniciar la cámara
-        detenerScanner();
-      }
+      vueloActivo = vuelo;
+      if (codeReader) detenerScanner();
       listado = [];
       listadoElem.innerHTML = '';
       contadorElem.textContent = 'Total: 0';
       await iniciarScanner(vuelo);
+    });
+
+    manualBtn.addEventListener('click', () => {
+      const codigo = manualInput.value.trim();
+      if (!codigo) return;
+      if (listado.includes(codigo)) {
+        alert("⚠️ Código repetido");
+      } else {
+        listado.push(codigo);
+        agregarFila(codigo);
+        enviarDatos(vueloActivo, codigo);
+      }
+      manualInput.value = "";
+    });
+
+    finalizarBtn.addEventListener('click', () => {
+      if (!vueloActivo) {
+        alert("No hay vuelo activo");
+        return;
+      }
+      alert(`✈️ Vuelo ${vueloActivo}\n📦 Se han contabilizado ${listado.length} valijas.`);
     });
 
     toggleFlashBtn.addEventListener('click', () => {
@@ -128,31 +172,18 @@
           return;
         }
         torchOn = !torchOn;
-        track.applyConstraints({
-          advanced: [{torch: torchOn}]
-        }).then(() => {
-          toggleFlashBtn.textContent = torchOn ? 'Apagar Linterna 🔦' : 'Encender Linterna 🔦';
-        }).catch(e => {
-          console.error('Error al cambiar estado de linterna:', e);
-        });
-      }).catch(e => {
-        console.error('No se pudo acceder a capacidades de la cámara:', e);
+        track.applyConstraints({ advanced: [{torch: torchOn}] })
+          .then(() => { toggleFlashBtn.textContent = torchOn ? 'Apagar Linterna 🔦' : 'Encender Linterna 🔦'; })
+          .catch(e => console.error('Error al cambiar linterna:', e));
       });
     });
 
     async function iniciarScanner(vuelo) {
       try {
-        // Pedir cámara con autofocus y linterna si está disponible
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { exact: "environment" },
-            focusMode: "continuous" // intento de autofocus, pero no todos los navegadores lo soportan
-          }
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         videoElem.srcObject = stream;
         track = stream.getVideoTracks()[0];
 
-        // Verificar si el dispositivo soporta linterna
         const capabilities = track.getCapabilities();
         if (capabilities.torch) {
           toggleFlashBtn.disabled = false;
@@ -163,39 +194,35 @@
         }
 
         codeReader = new ZXing.BrowserMultiFormatReader();
-
         codeReader.decodeFromVideoDevice(null, 'video', (result, err) => {
           if (result) {
             const codigo = result.text.trim();
-            if (listado.includes(codigo)) {
-              // Código repetido, no lo agregamos ni enviamos de nuevo
-              // Puedes avisar si quieres, pero mejor evitar alert repetidos
-              console.log("Código repetido:", codigo);
-            } else {
+            if (!listado.includes(codigo)) {
               listado.push(codigo);
               agregarFila(codigo);
               enviarDatos(vuelo, codigo);
             }
           }
           if (err && !(err instanceof ZXing.NotFoundException)) {
-            // Mostrar errores que no sean solo "no encontrado"
             console.error(err);
           }
         });
+
+        // Forzar reintentos de enfoque cada 5s
+        setInterval(() => {
+          if (track) {
+            track.applyConstraints({ focusMode: "continuous" }).catch(() => {});
+          }
+        }, 5000);
+
       } catch (error) {
         alert("Error al acceder a la cámara: " + error.message);
       }
     }
 
     function detenerScanner() {
-      if (codeReader) {
-        codeReader.reset();
-        codeReader = null;
-      }
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-        stream = null;
-      }
+      if (codeReader) { codeReader.reset(); codeReader = null; }
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
       toggleFlashBtn.disabled = true;
       torchOn = false;
       toggleFlashBtn.textContent = 'Linterna 🔦';
@@ -219,10 +246,7 @@
       .catch(err => console.error("Error:", err));
     }
 
-    // Detener la cámara cuando se cierre la pestaña o se recargue
-    window.addEventListener('beforeunload', () => {
-      detenerScanner();
-    });
+    window.addEventListener('beforeunload', () => detenerScanner());
   </script>
 </body>
 </html>
