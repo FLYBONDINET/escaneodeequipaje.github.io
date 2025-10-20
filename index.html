@@ -67,6 +67,7 @@
   </div>
 </div>
 
+<!-- UMD de @zxing/library. En esta versión, el listado de cámaras está en BrowserCodeReader -->
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
 <script>
 let reader;
@@ -75,14 +76,27 @@ let torchOn = false;
 let currentCar = 1;
 let carts = [];                 // [{id, bags:[] }]
 let allCodes = new Set();       // para duplicados
-let scanning = false;
 let deviceId = null;
 
 const $ = sel => document.querySelector(sel);
 
+async function getVideoInputsFallback(){
+  // Fallback nativo si la función UMD no existe
+  if(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices){
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    return devs.filter(d => d.kind === 'videoinput').map(d => ({ deviceId: d.deviceId, label: d.label }));
+  }
+  return [];
+}
+
 async function listarCamaras() {
   try{
-    const devs = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+    let devs = [];
+    if (ZXing.BrowserCodeReader && ZXing.BrowserCodeReader.listVideoInputDevices) {
+      devs = await ZXing.BrowserCodeReader.listVideoInputDevices();
+    } else {
+      devs = await getVideoInputsFallback();
+    }
     const sel = $("#cameraSelect");
     sel.innerHTML = "";
     devs.forEach(d => {
@@ -92,8 +106,8 @@ async function listarCamaras() {
       sel.appendChild(opt);
     });
     // elegir cámara trasera si existe
-    const env = devs.find(d => /back|rear|environment/i.test(d.label));
-    sel.value = env?.deviceId || devs[0]?.deviceId || "";
+    const env = devs.find(d => /back|rear|environment/i.test(d.label||''));
+    sel.value = env?.deviceId || (devs[0] && devs[0].deviceId) || "";
   }catch(e){
     alert("No pude listar cámaras: " + e.message);
   }
@@ -121,8 +135,7 @@ async function escanear(){
   reader = new ZXing.BrowserMultiFormatReader();
   const video = $("#preview");
   try{
-    // arrancar con cámara elegida
-    await reader.decodeFromVideoDevice(deviceId, video, (result, err)=>{
+    await reader.decodeFromVideoDevice(deviceId, video, (result)=>{
       if(result){
         const code = result.text.trim();
         if(allCodes.has(code)){
@@ -130,14 +143,13 @@ async function escanear(){
           if(navigator.vibrate) navigator.vibrate(200);
         }else{
           allCodes.add(code);
-          const carro = carts.find(c=>c.id===currentCar);
+          const carro = carts.find(c=>String(c.id)===String(currentCar));
           carro.bags.push(code);
           actualizarInfo();
         }
       }
     });
 
-    // obtener track y capabilities para torch / focus
     const stream = video.srcObject;
     const tracks = stream ? stream.getVideoTracks() : [];
     streamTrack = tracks[0];
@@ -239,26 +251,23 @@ async function guardarEnSheet(){
     codes: Array.from(allCodes)
   };
   try{
-    // Intento normal (CORS permitido)
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
     if(!res.ok){
-      // Intento sin CORS legible (pero envía)
       await fetch(url, { method:"POST", mode:"no-cors", body: JSON.stringify(payload) });
       alert("Enviado (modo no-cors). Verifica en tu Google Sheet.");
       return;
     }
-    const data = await res.json().catch(()=>({}));
+    await res.json().catch(()=>({}));
     alert("Guardado en Google Sheet ✔️");
   }catch(e){
     alert("No se pudo guardar en Sheet: " + e.message);
   }
 }
 
-// Precarga webapp de localStorage y lista cámaras tras permiso
 document.addEventListener('DOMContentLoaded', async ()=>{
   const saved = localStorage.getItem("fb_webapp"); if(saved) $("#webapp").value = saved;
   try{
