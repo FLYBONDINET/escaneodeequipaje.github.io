@@ -1,2 +1,2 @@
-// Configuración: poné tu WebApp URL de Google Apps Script acá (o dejalo vacío para no usar Sheets)
-const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbwzYfR8uqJ-rKrbB3ET_CAfyfJ13BSQJtNK9ITPBEABOGr9YQVHlxd6XhTk_EBfaugL/exec"; // Ej: "https://script.google.com/macros/s/XXXX/exec"
+// Poné tu WebApp URL de Google Apps Script (termina en /exec)
+const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzc83w9UN1x0v63O-TpJDwxeRyZR3RHrbbTMc0jDZ-KH4wiIXMtnFeiZi5-42ROg3B4/exec"; // Ej: "https://script.google.com/macros/s/XXXX/exec"

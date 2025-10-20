@@ -3,14 +3,19 @@
   let reader;
   let streamTrack;
   let torchOn = false;
-  let currentCart = null;          // siempre se pide por prompt
-  let carts = [];                  // [{id, bags:[] }]
-  let allCodes = new Set();        // duplicados globales
+  let currentCart = null;
+  let carts = [];
+  let allCodes = new Set();
   let deviceId = null;
+
+  let confirming = false;
+  let pendingCode = null;
+
+  const soundOk = new Audio('sounds/beep_ok.wav');
+  const soundErr = new Audio('sounds/beep_err.wav');
 
   const $ = sel => document.querySelector(sel);
 
-  // ====== helpers cámara ======
   async function getVideoInputsFallback(){
     if(navigator.mediaDevices?.enumerateDevices){
       const devs = await navigator.mediaDevices.enumerateDevices();
@@ -27,46 +32,53 @@
       } else {
         devs = await getVideoInputsFallback();
       }
-      const sel = $("#cameraSelect");
-      sel.innerHTML = "";
-      devs.forEach(d => {
-        const opt = document.createElement('option');
-        opt.value = d.deviceId;
-        opt.textContent = d.label || `Cam ${d.deviceId.substring(0,6)}...`;
-        sel.appendChild(opt);
-      });
-      const env = devs.find(d => /back|rear|environment/i.test(d.label||''));
-      sel.value = env?.deviceId || (devs[0] && devs[0].deviceId) || "";
+      const selInit = $("#cameraSelect");
+      if (selInit) {
+        selInit.innerHTML = "";
+        devs.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Cam ${d.deviceId.substring(0,6)}...`;
+          selInit.appendChild(opt);
+        });
+        const env = devs.find(d => /back|rear|environment/i.test(d.label||''));
+        selInit.value = env?.deviceId || (devs[0] && devs[0].deviceId) || "";
+      }
+      const selLive = $("#cameraSelectLive");
+      if (selLive) {
+        selLive.innerHTML = "";
+        devs.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Cam ${d.deviceId.substring(0,6)}...`;
+          selLive.appendChild(opt);
+        });
+        selLive.value = deviceId || (devs.find(d => /back|rear|environment/i.test(d.label||''))?.deviceId) || (devs[0]?.deviceId || "");
+      }
     }catch(e){
       alert("No pude listar cámaras: " + e.message);
     }
   }
 
-  // Reinicia el lector manteniendo la misma cámara (usado al cambiar de carro)
   async function restartScan(){
     if(reader){ try{ reader.reset(); }catch{} }
     reader = new ZXing.BrowserMultiFormatReader();
     const video = $("#preview");
 
     await reader.decodeFromVideoDevice(deviceId, video, (result)=>{
-      if(!result) return;
+      if(!result || confirming) return;
       const code = String(result.text || "").trim();
       if(!code) return;
 
-      if(allCodes.has(code)){
-        alert("Código duplicado: " + code);
-        if(navigator.vibrate) navigator.vibrate(200);
-        return;
-      }
-      allCodes.add(code);
-      const carro = carts.find(c=> String(c.id)===String(currentCart));
-      if(carro){
-        carro.bags.push(code);
-        actualizarInfo();
-      }
+      pendingCode = code;
+      confirming = true;
+      $("#codePreview").textContent = code;
+      const isDup = allCodes.has(code);
+      $("#dupWarn").style.display = isDup ? 'block' : 'none';
+      if(isDup){ try{ soundErr.currentTime = 0; soundErr.play(); }catch{} }
+      $("#confirmModal").style.display = "flex";
     });
 
-    // capacidades (torch, focus, tap-to-focus)
     const stream = video.srcObject;
     const tracks = stream ? stream.getVideoTracks() : [];
     streamTrack = tracks[0];
@@ -90,7 +102,6 @@
     }
   }
 
-  // ====== flujo ======
   async function iniciar(){
     const vuelo = $("#vuelo").value.trim();
     const dia = $("#dia").value.trim();
@@ -111,8 +122,7 @@
     $("#form").style.display = "none";
     $("#scanner").style.display = "block";
 
-    deviceId = $("#cameraSelect").value || null;
-    // Primera vez: iniciar y listar cámaras (para que aparezcan labels)
+    deviceId = $("#cameraSelect").value || deviceId || null;
     await restartScan();
     await listarCamaras();
   }
@@ -120,7 +130,6 @@
   function actualizarInfo(){
     $("#badgeCarro").textContent = "Carro " + currentCart;
     $("#badgeContador").textContent = totalBags() + " valijas";
-
     let html = "";
     for(const c of carts){
       html += `<b>Carro ${c.id}</b>: ${c.bags.length} valijas<br>`;
@@ -140,7 +149,6 @@
       carts.push({ id: currentCart, bags: [] });
     }
     actualizarInfo();
-    // **Clave:** reiniciar lector al cambiar de carro
     await restartScan();
   }
 
@@ -149,7 +157,6 @@
     const dia = $("#dia").value;
     const maletero = $("#maletero").value;
 
-    // layout centrado
     const wrap = document.createElement('div');
     wrap.style.textAlign = 'center';
 
@@ -172,7 +179,6 @@
     pTot.innerHTML = `<b>Total de bags:</b> ${totalBags()}`;
     wrap.appendChild(pTot);
 
-    // Carros desplegables
     const list = document.createElement('div');
     list.style.textAlign = 'left';
     list.style.margin = '0 auto';
@@ -234,10 +240,37 @@
     }
   }
 
-  // ====== Guardado en Google Sheets ======
+  function hideConfirm(){
+    $("#confirmModal").style.display = "none";
+    confirming = false;
+    pendingCode = null;
+  }
+
+  function acceptCode(){
+    if(!pendingCode) return hideConfirm();
+    if(allCodes.has(pendingCode)){
+      try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
+      alert("Código duplicado: " + pendingCode);
+      if(navigator.vibrate) navigator.vibrate(200);
+      return hideConfirm();
+    }
+    try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+    allCodes.add(pendingCode);
+    const carro = carts.find(c=> String(c.id)===String(currentCart));
+    if(carro){
+      carro.bags.push(pendingCode);
+      actualizarInfo();
+    }
+    hideConfirm();
+  }
+
+  function retryCode(){
+    try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
+    hideConfirm();
+  }
+
   async function guardarEnSheet(){
     if(!WEBAPP_URL){ alert("No hay WebApp configurada (editá js/config.js)"); return; }
-
     const payload = {
       day: $("#dia").value.trim(),
       flight: $("#vuelo").value.trim(),
@@ -246,9 +279,7 @@
       carts: carts.map(c=> ({id: c.id, count: c.bags.length})),
       codes: Array.from(allCodes)
     };
-
     try{
-      // Intento 1: CORS normal
       const res = await fetch(WEBAPP_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -257,17 +288,11 @@
         cache: "no-store",
       });
       if(!res.ok) throw new Error("HTTP " + res.status);
-      // Si tu WebApp devuelve JSON, esto funciona:
       await res.json().catch(()=>({}));
       alert("Guardado en Google Sheet ✔️");
     }catch(err){
-      // Intento 2: no-cors (no podremos leer respuesta, pero envía)
       try{
-        await fetch(WEBAPP_URL, {
-          method: "POST",
-          body: JSON.stringify(payload),
-          mode: "no-cors"
-        });
+        await fetch(WEBAPP_URL, { method: "POST", body: JSON.stringify(payload), mode: "no-cors" });
         alert("Enviado (modo no-cors). Verifica en tu Google Sheet.");
       }catch(e2){
         alert("No se pudo guardar en Sheet: " + e2.message);
@@ -275,7 +300,6 @@
     }
   }
 
-  // ====== eventos ======
   document.addEventListener('DOMContentLoaded', async ()=>{
     $("#btnStart").addEventListener('click', iniciar);
     $("#btnNextCart").addEventListener('click', ()=>{ siguienteCarro(); });
@@ -284,6 +308,14 @@
     $("#btnTorch").addEventListener('click', toggleTorch);
     $("#btnSave").addEventListener('click', guardarEnSheet);
     $("#btnNew").addEventListener('click', ()=>location.reload());
+
+    $("#btnAccept").addEventListener('click', acceptCode);
+    $("#btnRetry").addEventListener('click', retryCode);
+
+    $("#cameraSelectLive").addEventListener('change', async (e)=>{
+      deviceId = e.target.value || null;
+      await restartScan();
+    });
 
     try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
     await listarCamaras();
