@@ -1,0 +1,9 @@
+{
+  "short_name": "FB Scanner",
+  "name": "Flybondi Baggage Scanner",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#FFD700",
+  "icons": []
+}
