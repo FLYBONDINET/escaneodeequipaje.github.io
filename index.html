@@ -1,280 +1,73 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Flybondi Baggage Scanner</title>
-<style>
-  :root { --fly-yellow:#FFD700; --fly-black:#000; }
-  body { font-family: Arial, sans-serif; margin:0; background:#fff; color:#111; }
-  header { background:var(--fly-yellow); padding:12px; text-align:center; font-weight:800; color:var(--fly-black); }
-  .wrap{padding:12px}
-  .card { margin:12px 0; padding:12px; border:1px solid #ddd; border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.08); }
-  label{font-size:12px; color:#333; display:block; margin-bottom:4px}
-  input, select, button { padding:10px; border-radius:8px; border:1px solid #ccc; width:100%; margin-bottom:10px; }
-  button { background:var(--fly-black); color:var(--fly-yellow); font-weight:700; cursor:pointer; }
-  .row{display:flex; gap:8px; flex-wrap:wrap}
-  .row>div{flex:1 1 220px}
-  video { width:100%; border-radius:10px; margin-top:8px; background:#000; }
-  .pill{display:inline-block; padding:4px 10px; border-radius:999px; background:#fff1b3; color:#111; font-weight:700}
-  .muted{color:#666; font-size:12px}
-  .hl{background:#fffbe6; padding:6px 8px; border-radius:8px; border:1px dashed #ccc}
-  .right { margin-top:8px; display:flex; gap:8px; flex-wrap:wrap }
-  .warn{ background:#b00020; color:#fff }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flybondi Baggage Scanner</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<header>Flybondi Baggage Scanner</header>
-<div class="wrap">
-  <div class="card" id="form">
-    <div class="row">
-      <div><label>Número de vuelo</label><input id="vuelo" placeholder="Ej: FO501" autocomplete="off"></div>
-      <div><label>Día (YYYY-MM-DD)</label><input id="dia" type="date"></div>
-      <div><label>Nombre de maletero</label><input id="maletero" placeholder="Nombre y apellido"></div>
+  <header>Flybondi Baggage Scanner</header>
+
+  <div class="wrap">
+    <!-- Formulario inicial -->
+    <div class="card" id="form">
+      <div class="row">
+        <div>
+          <label>Número de vuelo</label>
+          <input id="vuelo" placeholder="Ej: FO501" autocomplete="off">
+        </div>
+        <div>
+          <label>Día (YYYY-MM-DD)</label>
+          <input id="dia" type="date">
+        </div>
+        <div>
+          <label>Nombre de maletero</label>
+          <input id="maletero" placeholder="Nombre y apellido">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Elegir cámara</label>
+          <select id="cameraSelect"><option value="">(permití la cámara primero)</option></select>
+        </div>
+      </div>
+      <button id="btnStart">Iniciar escaneo</button>
+      <div class="muted">Consejo: tocá el video para forzar el autofocus en algunos móviles.</div>
     </div>
-    <div class="row">
-      <div><label>Elegir cámara</label><select id="cameraSelect"><option value="">(permití la cámara primero)</option></select></div>
-      <div><label>URL WebApp Google (Apps Script)</label><input id="webapp" placeholder="https://script.google.com/macros/s/XXXX/exec"></div>
+
+    <!-- Escaneo -->
+    <div class="card" id="scanner" style="display:none;">
+      <div class="row">
+        <div><span class="pill" id="badgeVuelo">Vuelo —</span></div>
+        <div><span class="pill" id="badgeCarro">Carro —</span></div>
+        <div><span class="pill" id="badgeContador">0 valijas</span></div>
+      </div>
+      <video id="preview" playsinline muted></video>
+      <div class="right">
+        <button id="btnTorch" class="warn" disabled>Linterna</button>
+        <button id="btnNextCart">Siguiente carro</button>
+        <button id="btnFinish">Finalizar escaneo</button>
+        <button id="btnCancel" class="warn">Cancelar</button>
+      </div>
+      <div id="info" class="hl" style="margin-top:8px"></div>
     </div>
-    <button onclick="iniciar()">Iniciar escaneo</button>
-    <div class="muted">Consejo: tocá el video para forzar el autofocus en algunos móviles.</div>
+
+    <!-- Resumen -->
+    <div class="card" id="resumen" style="display:none;">
+      <h3>Resumen</h3>
+      <div id="res"></div>
+      <div class="right">
+        <button id="btnSave">Guardar en Google Sheet</button>
+        <button id="btnNew">Nuevo vuelo</button>
+      </div>
+      <div class="muted">Se guarda en una sola fila: Día, Vuelo, Maletero y todos los códigos separados por comas.</div>
+    </div>
   </div>
 
-  <div class="card" id="scanner" style="display:none;">
-    <div class="row">
-      <div><span class="pill" id="badgeVuelo">Vuelo —</span></div>
-      <div><span class="pill" id="badgeCarro">Carro 1</span></div>
-      <div><span class="pill" id="badgeContador">0 valijas</span></div>
-    </div>
-    <video id="preview" playsinline muted></video>
-    <div class="right">
-      <button onclick="toggleTorch()" id="btnTorch" class="warn" disabled>Linterna</button>
-      <button onclick="siguienteCarro()">Siguiente carro</button>
-      <button onclick="finalizar()">Finalizar escaneo</button>
-      <button class="warn" onclick="cancelar()">Cancelar</button>
-    </div>
-    <div id="info" class="hl" style="margin-top:8px"></div>
-  </div>
-
-  <div class="card" id="resumen" style="display:none;">
-    <h3>Resumen</h3>
-    <div id="res"></div>
-    <div class="right">
-      <button onclick="guardarEnSheet()">Guardar en Google Sheet</button>
-      <button onclick="reiniciar()">Nuevo vuelo</button>
-    </div>
-    <div class="muted">Se guarda en una sola fila: Día, Vuelo, Maletero y todos los códigos separados por comas.</div>
-  </div>
-</div>
-
-<!-- UMD de @zxing/library. En esta versión, el listado de cámaras está en BrowserCodeReader -->
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
-<script>
-let reader;
-let streamTrack;
-let torchOn = false;
-let currentCar = 1;
-let carts = [];                 // [{id, bags:[] }]
-let allCodes = new Set();       // para duplicados
-let deviceId = null;
-
-const $ = sel => document.querySelector(sel);
-
-async function getVideoInputsFallback(){
-  // Fallback nativo si la función UMD no existe
-  if(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices){
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    return devs.filter(d => d.kind === 'videoinput').map(d => ({ deviceId: d.deviceId, label: d.label }));
-  }
-  return [];
-}
-
-async function listarCamaras() {
-  try{
-    let devs = [];
-    if (ZXing.BrowserCodeReader && ZXing.BrowserCodeReader.listVideoInputDevices) {
-      devs = await ZXing.BrowserCodeReader.listVideoInputDevices();
-    } else {
-      devs = await getVideoInputsFallback();
-    }
-    const sel = $("#cameraSelect");
-    sel.innerHTML = "";
-    devs.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d.deviceId;
-      opt.textContent = d.label || `Cam ${d.deviceId.substring(0,6)}...`;
-      sel.appendChild(opt);
-    });
-    // elegir cámara trasera si existe
-    const env = devs.find(d => /back|rear|environment/i.test(d.label||''));
-    sel.value = env?.deviceId || (devs[0] && devs[0].deviceId) || "";
-  }catch(e){
-    alert("No pude listar cámaras: " + e.message);
-  }
-}
-
-async function iniciar(){
-  const vuelo = $("#vuelo").value.trim();
-  const dia = $("#dia").value.trim();
-  const maletero = $("#maletero").value.trim();
-  if(!vuelo || !dia || !maletero){ alert("Completá vuelo, día y maletero"); return; }
-
-  localStorage.setItem("fb_webapp", $("#webapp").value.trim());
-  $("#badgeVuelo").textContent = "Vuelo " + vuelo;
-  $("#form").style.display = "none";
-  $("#scanner").style.display = "block";
-
-  carts = [{ id: currentCar, bags: [] }];
-  allCodes = new Set();
-  deviceId = $("#cameraSelect").value || null;
-  await escanear();
-}
-
-async function escanear(){
-  if(reader){ try{ reader.reset(); }catch{} }
-  reader = new ZXing.BrowserMultiFormatReader();
-  const video = $("#preview");
-  try{
-    await reader.decodeFromVideoDevice(deviceId, video, (result)=>{
-      if(result){
-        const code = result.text.trim();
-        if(allCodes.has(code)){
-          alert("Código duplicado: " + code);
-          if(navigator.vibrate) navigator.vibrate(200);
-        }else{
-          allCodes.add(code);
-          const carro = carts.find(c=>String(c.id)===String(currentCar));
-          carro.bags.push(code);
-          actualizarInfo();
-        }
-      }
-    });
-
-    const stream = video.srcObject;
-    const tracks = stream ? stream.getVideoTracks() : [];
-    streamTrack = tracks[0];
-    $("#btnTorch").disabled = true;
-    if(streamTrack){
-      const caps = streamTrack.getCapabilities ? streamTrack.getCapabilities() : {};
-      // Torch
-      if(caps.torch){
-        $("#btnTorch").disabled = false;
-      }
-      // Intentar focus continuo si existe
-      const cons = {};
-      if(caps.focusMode && caps.focusMode.includes("continuous")){
-        cons.advanced = [{ focusMode: "continuous" }];
-      }
-      if(Object.keys(cons).length){
-        try{ await streamTrack.applyConstraints(cons); }catch{}
-      }
-      // Tap-to-focus (POI) en algunos navegadores
-      video.addEventListener('click', async (ev)=>{
-        const rect = video.getBoundingClientRect();
-        const x = (ev.clientX - rect.left) / rect.width;
-        const y = (ev.clientY - rect.top) / rect.height;
-        if(streamTrack && streamTrack.applyConstraints){
-          try{
-            await streamTrack.applyConstraints({ advanced: [{ pointsOfInterest: [{x, y}] }] });
-          }catch{}
-        }
-      });
-    }
-    await listarCamaras(); // actualizar lista con labels ya disponibles
-  }catch(e){
-    alert("Error de cámara: " + e.message);
-  }
-}
-
-function actualizarInfo(){
-  $("#badgeCarro").textContent = "Carro " + currentCar;
-  $("#badgeContador").textContent = totalBags() + " valijas";
-
-  let html = "";
-  for(const c of carts){
-    html += `<b>Carro ${c.id}</b>: ${c.bags.length} valijas<br>`;
-  }
-  $("#info").innerHTML = html;
-}
-
-function totalBags(){
-  let t = 0; carts.forEach(c=> t+=c.bags.length); return t;
-}
-
-function siguienteCarro(){
-  const next = prompt("Número de siguiente carro:");
-  if(!next) return;
-  currentCar = String(next).trim();
-  if(!carts.find(c=> String(c.id)===currentCar)){
-    carts.push({ id: currentCar, bags: [] });
-  }
-  actualizarInfo();
-}
-
-function finalizar(){
-  $("#scanner").style.display = "none";
-  $("#resumen").style.display = "block";
-
-  let html = `<p><b>Vuelo:</b> ${$("#vuelo").value} — <b>Día:</b> ${$("#dia").value} — <b>Maletero:</b> ${$("#maletero").value}</p>`;
-  html += `<p><b>Total valijas:</b> ${totalBags()}</p>`;
-  for(const c of carts){
-    html += `<div><b>Carro ${c.id}</b>: ${c.bags.length} valijas</div>`;
-  }
-  $("#res").innerHTML = html;
-}
-
-function cancelar(){
-  if(reader){ try{ reader.reset(); }catch{} }
-  location.reload();
-}
-
-async function toggleTorch(){
-  if(!streamTrack) return;
-  try{
-    torchOn = !torchOn;
-    await streamTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-    $("#btnTorch").textContent = torchOn ? "Linterna (ON)" : "Linterna";
-  }catch(e){
-    alert("Tu dispositivo no permite controlar la linterna");
-  }
-}
-
-async function guardarEnSheet(){
-  const url = $("#webapp").value.trim() || localStorage.getItem("fb_webapp") || "";
-  if(!url){ alert("Pegá la URL de tu WebApp de Google Apps Script"); return; }
-  const payload = {
-    day: $("#dia").value.trim(),
-    flight: $("#vuelo").value.trim(),
-    porter: $("#maletero").value.trim(),
-    total: totalBags(),
-    carts: carts.map(c=> ({id: c.id, count: c.bags.length})),
-    codes: Array.from(allCodes)
-  };
-  try{
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if(!res.ok){
-      await fetch(url, { method:"POST", mode:"no-cors", body: JSON.stringify(payload) });
-      alert("Enviado (modo no-cors). Verifica en tu Google Sheet.");
-      return;
-    }
-    await res.json().catch(()=>({}));
-    alert("Guardado en Google Sheet ✔️");
-  }catch(e){
-    alert("No se pudo guardar en Sheet: " + e.message);
-  }
-}
-
-document.addEventListener('DOMContentLoaded', async ()=>{
-  const saved = localStorage.getItem("fb_webapp"); if(saved) $("#webapp").value = saved;
-  try{
-    await navigator.mediaDevices.getUserMedia({ video: true });
-  }catch{}
-  await listarCamaras();
-});
-</script>
+  <!-- Libs -->
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

@@ -1,0 +1,16 @@
+:root{ --fly-yellow:#FFD700; --fly-black:#000; }
+body{ font-family: Arial, sans-serif; margin:0; background:#fff; color:#111; }
+header{ background:var(--fly-yellow); padding:12px; text-align:center; font-weight:800; color:var(--fly-black); }
+.wrap{ padding:12px }
+.card{ margin:12px 0; padding:12px; border:1px solid #ddd; border-radius:12px; box-shadow:0 3px 12px rgba(0,0,0,.08) }
+label{ font-size:12px; color:#333; display:block; margin-bottom:4px }
+input, select, button{ padding:10px; border-radius:8px; border:1px solid #ccc; width:100%; margin-bottom:10px }
+button{ background:var(--fly-black); color:var(--fly-yellow); font-weight:700; cursor:pointer }
+.row{ display:flex; gap:8px; flex-wrap:wrap }
+.row>div{ flex:1 1 220px }
+video{ width:100%; border-radius:10px; margin-top:8px; background:#000 }
+.pill{ display:inline-block; padding:4px 10px; border-radius:999px; background:#fff1b3; color:#111; font-weight:700 }
+.muted{ color:#666; font-size:12px }
+.hl{ background:#fffbe6; padding:6px 8px; border-radius:8px; border:1px dashed #ccc }
+.right{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap }
+.warn{ background:#b00020; color:#fff }
