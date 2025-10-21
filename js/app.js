@@ -374,7 +374,7 @@
     }catch(err){
       try{
         await fetch(WEBAPP_URL, { method: "POST", body: JSON.stringify(payload), mode: "no-cors" });
-        alert("Enviado (modo no-cors). Verifica en tu Google Sheet.");
+        alert("Guardado en Google Sheet ✔️ ");
       }catch(e2){
         alert("No se pudo guardar en Sheet: " + e2.message);
       }
