@@ -4,18 +4,21 @@
   let streamTrack;
   let torchOn = false;
   let currentCart = null;
-  let carts = [];
-  let allCodes = new Set();
+  let carts = [];                  // [{id, bags:[] }]
+  let allCodes = new Set();        // duplicados globales
   let deviceId = null;
 
+  // confirmación / edición
   let confirming = false;
   let pendingCode = null;
 
+  // sonidos
   const soundOk = new Audio('sounds/beep_ok.wav');
   const soundErr = new Audio('sounds/beep_err.wav');
 
   const $ = sel => document.querySelector(sel);
 
+  // ====== cámara ======
   async function getVideoInputsFallback(){
     if(navigator.mediaDevices?.enumerateDevices){
       const devs = await navigator.mediaDevices.enumerateDevices();
@@ -32,6 +35,7 @@
       } else {
         devs = await getVideoInputsFallback();
       }
+      // select inicial
       const selInit = $("#cameraSelect");
       if (selInit) {
         selInit.innerHTML = "";
@@ -44,6 +48,7 @@
         const env = devs.find(d => /back|rear|environment/i.test(d.label||''));
         selInit.value = env?.deviceId || (devs[0] && devs[0].deviceId) || "";
       }
+      // select en vivo
       const selLive = $("#cameraSelectLive");
       if (selLive) {
         selLive.innerHTML = "";
@@ -69,16 +74,19 @@
       if(!result || confirming) return;
       const code = String(result.text || "").trim();
       if(!code) return;
-
+      // abrir modal con el código, editable
       pendingCode = code;
       confirming = true;
-      $("#codePreview").textContent = code;
+      $("#codeEdit").value = code;
       const isDup = allCodes.has(code);
       $("#dupWarn").style.display = isDup ? 'block' : 'none';
       if(isDup){ try{ soundErr.currentTime = 0; soundErr.play(); }catch{} }
       $("#confirmModal").style.display = "flex";
+      $("#codeEdit").focus();
+      $("#codeEdit").select();
     });
 
+    // capacidades (torch/focus)
     const stream = video.srcObject;
     const tracks = stream ? stream.getVideoTracks() : [];
     streamTrack = tracks[0];
@@ -102,6 +110,7 @@
     }
   }
 
+  // ====== flujo ======
   async function iniciar(){
     const vuelo = $("#vuelo").value.trim();
     const dia = $("#dia").value.trim();
@@ -240,6 +249,7 @@
     }
   }
 
+  // ====== confirmación / edición ======
   function hideConfirm(){
     $("#confirmModal").style.display = "none";
     confirming = false;
@@ -247,18 +257,22 @@
   }
 
   function acceptCode(){
-    if(!pendingCode) return hideConfirm();
-    if(allCodes.has(pendingCode)){
+    const edited = ($("#codeEdit").value || "").trim();
+    if(!edited){ try{ soundErr.currentTime = 0; soundErr.play(); }catch{}; alert("Código vacío."); return; }
+
+    // si el editado es duplicado global
+    if(allCodes.has(edited)){
       try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
-      alert("Código duplicado: " + pendingCode);
+      alert("Código duplicado: " + edited);
       if(navigator.vibrate) navigator.vibrate(200);
-      return hideConfirm();
+      return; // mantener modal abierto para que lo corrija
     }
+
     try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
-    allCodes.add(pendingCode);
+    allCodes.add(edited);
     const carro = carts.find(c=> String(c.id)===String(currentCart));
     if(carro){
-      carro.bags.push(pendingCode);
+      carro.bags.push(edited);
       actualizarInfo();
     }
     hideConfirm();
@@ -269,6 +283,73 @@
     hideConfirm();
   }
 
+  // ====== gestor de códigos ======
+  function openCodesManager(){
+    const cont = $("#codesList");
+    cont.innerHTML = "";
+
+    // Listar por carro
+    carts.forEach(c=>{
+      const title = document.createElement('div');
+      title.className = 'code-cart';
+      title.textContent = `Carro ${c.id}`;
+      cont.appendChild(title);
+
+      if(!c.bags.length){
+        const empty = document.createElement('div');
+        empty.className = 'muted';
+        empty.textContent = '(sin códigos)';
+        cont.appendChild(empty);
+        return;
+      }
+
+      c.bags.forEach((code, idx)=>{
+        const row = document.createElement('div');
+        row.className = 'code-item';
+
+        const left = document.createElement('div');
+        left.innerHTML = `<span>${code}</span> <small>#${idx+1}</small>`;
+
+        const del = document.createElement('button');
+        del.className = 'code-del';
+        del.textContent = '🗑️';
+        del.addEventListener('click', ()=>{
+          // doble confirmación
+          const c1 = confirm(`¿Eliminar el código ${code}?`);
+          if(!c1) return;
+          const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
+          if(!c2) return;
+
+          // quitar de carro y del set global
+          const pos = c.bags.indexOf(code);
+          if(pos >= 0){
+            c.bags.splice(pos, 1);
+          }
+          // si ese código ya no está en ningún carro, lo sacamos del set global
+          const stillExists = carts.some(cc => cc.bags.includes(code));
+          if(!stillExists){
+            allCodes.delete(code);
+          }
+
+          // refrescar UI
+          actualizarInfo();
+          openCodesManager(); // recargar listado
+        });
+
+        row.appendChild(left);
+        row.appendChild(del);
+        cont.appendChild(row);
+      });
+    });
+
+    $("#codesModal").style.display = 'flex';
+  }
+
+  function closeCodesManager(){
+    $("#codesModal").style.display = 'none';
+  }
+
+  // ====== guardar en Sheets ======
   async function guardarEnSheet(){
     if(!WEBAPP_URL){ alert("No hay WebApp configurada (editá js/config.js)"); return; }
     const payload = {
@@ -300,6 +381,7 @@
     }
   }
 
+  // ====== eventos ======
   document.addEventListener('DOMContentLoaded', async ()=>{
     $("#btnStart").addEventListener('click', iniciar);
     $("#btnNextCart").addEventListener('click', ()=>{ siguienteCarro(); });
@@ -311,6 +393,9 @@
 
     $("#btnAccept").addEventListener('click', acceptCode);
     $("#btnRetry").addEventListener('click', retryCode);
+
+    $("#btnManageCodes").addEventListener('click', openCodesManager);
+    $("#btnCloseCodes").addEventListener('click', closeCodesManager);
 
     $("#cameraSelectLive").addEventListener('change', async (e)=>{
       deviceId = e.target.value || null;
