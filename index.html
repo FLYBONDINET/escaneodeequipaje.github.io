@@ -10,41 +10,61 @@
   <header>Flybondi Baggage Scanner</header>
 
   <div class="wrap">
+    <!-- Formulario inicial -->
     <div class="card" id="form">
       <div class="row">
-        <div><label>Número de vuelo</label><input id="vuelo" placeholder="Ej: FO501" autocomplete="off"></div>
-        <div><label>Día (YYYY-MM-DD)</label><input id="dia" type="date"></div>
-        <div><label>Nombre de maletero</label><input id="maletero" placeholder="Nombre y apellido"></div>
+        <div>
+          <label>Número de vuelo</label>
+          <input id="vuelo" placeholder="Ej: FO501" autocomplete="off">
+        </div>
+        <div>
+          <label>Día (YYYY-MM-DD)</label>
+          <input id="dia" type="date">
+        </div>
+        <div>
+          <label>Nombre de maletero</label>
+          <input id="maletero" placeholder="Nombre y apellido">
+        </div>
       </div>
       <div class="row">
-        <div><label>Elegir cámara</label><select id="cameraSelect"><option value="">(permití la cámara primero)</option></select></div>
+        <div>
+          <label>Elegir cámara</label>
+          <select id="cameraSelect">
+            <option value="">(permití la cámara primero)</option>
+          </select>
+        </div>
       </div>
       <button id="btnStart">Iniciar escaneo</button>
       <div class="muted">Consejo: tocá el video para forzar el autofocus en algunos móviles.</div>
     </div>
 
+    <!-- Escaneo (SIN CARROS) -->
     <div class="card" id="scanner" style="display:none;">
       <div class="row">
         <div><span class="pill" id="badgeVuelo">Vuelo —</span></div>
-        <div><span class="pill" id="badgeCarro">Carro —</span></div>
         <div><span class="pill" id="badgeContador">0 valijas</span></div>
       </div>
+
       <video id="preview" playsinline muted></video>
+
       <div class="row" style="margin-top:8px;">
         <div>
           <label>Cambiar cámara (durante escaneo)</label>
-          <select id="cameraSelectLive"><option value="">(seleccioná una cámara)</option></select>
+          <select id="cameraSelectLive">
+            <option value="">(seleccioná una cámara)</option>
+          </select>
         </div>
       </div>
+
       <div class="right">
         <button id="btnTorch" class="warn" disabled>Linterna</button>
-        <button id="btnNextCart">Siguiente carro</button>
+        <button id="btnManageCodes">Gestionar códigos</button>
         <button id="btnFinish">Finalizar escaneo</button>
         <button id="btnCancel" class="warn">Cancelar</button>
       </div>
-      <div id="info" class="hl" style="margin-top:8px"></div>
     </div>
 
+    <!-- Resumen -->
     <div class="card" id="resumen" style="display:none;">
       <h3>Resumen</h3>
       <div id="res"></div>
@@ -52,22 +72,43 @@
         <button id="btnSave">Guardar en Google Sheet</button>
         <button id="btnNew">Nuevo vuelo</button>
       </div>
-      <div class="muted">Se guarda en una sola fila: Día, Vuelo, Maletero y todos los códigos separados por comas.</div>
-    </div>
-  </div>
-
-  <div id="confirmModal" class="modal" style="display:none;">
-    <div class="modal-inner">
-      <h3>Confirmar código leído</h3>
-      <div id="codePreview" class="codebox"></div>
-      <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado</div>
-      <div class="right" style="justify-content:flex-end;">
-        <button id="btnRetry" class="warn">Reintentar</button>
-        <button id="btnAccept">Siguiente</button>
+      <div class="muted">
+        Se guarda en una sola fila: Día, Vuelo, Maletero, Total y todos los códigos (cada uno en su propia celda).
       </div>
     </div>
   </div>
 
+  <!-- Modal de confirmación con edición -->
+  <div id="confirmModal" class="modal" style="display:none;">
+    <div class="modal-inner">
+      <h3>Confirmar / editar código</h3>
+      <div class="muted" style="margin-bottom:4px;">
+        Podés corregirlo manualmente si el lector falló.
+      </div>
+      <input id="codeEdit" class="code-input" autocomplete="off" />
+      <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado</div>
+      <div class="right" style="justify-content:flex-end;">
+        <button id="btnRetry" class="warn">Reintentar</button>
+        <button id="btnAccept">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal gestor de códigos -->
+  <div id="codesModal" class="modal" style="display:none;">
+    <div class="modal-inner">
+      <h3>Gestor de códigos</h3>
+      <div class="muted" style="margin-bottom:6px;">
+        Tocá 🗑️ para eliminar (pide doble confirmación).
+      </div>
+      <div id="codesList" style="max-height:60vh; overflow:auto;"></div>
+      <div class="right" style="justify-content:flex-end;">
+        <button id="btnCloseCodes">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Librerías y scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/app.js"></script>
