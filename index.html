@@ -13,7 +13,6 @@
     <!-- Formulario inicial -->
     <div class="card" id="form">
       <div class="row">
-<<<<<<< HEAD
         <div>
           <label>Número de vuelo</label>
           <input id="vuelo" placeholder="Ej: FO501" autocomplete="off">
@@ -26,12 +25,6 @@
           <label>Nombre de maletero</label>
           <input id="maletero" placeholder="Nombre y apellido">
         </div>
-=======
-        <div><label>Número de vuelo</label><input id="vuelo" placeholder="Ej: FO501" autocomplete="off"></div>
-        <div><label>D
-          ía (YYYY-MM-DD)</label><input id="dia" type="date"></div>
-        <div><label>Nombre de maletero</label><input id="maletero" placeholder="Nombre y apellido"></div>
->>>>>>> d10e0654fbe42515902202b576a40836b109c5a3
       </div>
       <div class="row">
         <div>
@@ -45,7 +38,6 @@
       <div class="muted">Consejo: tocá el video para forzar el autofocus en algunos móviles.</div>
     </div>
 
-<<<<<<< HEAD
     <!-- Escaneo (SIN CARROS) -->
     <div class="card" id="scanner" style="display:none;">
       <div class="row">
@@ -70,33 +62,7 @@
         <button id="btnFinish">Finalizar escaneo</button>
         <button id="btnCancel" class="warn">Cancelar</button>
       </div>
-=======
-<div class="card" id="scanner" style="display:none;">
-  <div class="row">
-    <div><span class="pill" id="badgeVuelo">Vuelo —</span></div>
-    <div><span class="pill" id="badgeCarro">Carro —</span></div>
-    <div><span class="pill" id="badgeContador">0 valijas</span></div>
-  </div>
-
-  <video id="preview" playsinline muted></video>
-
-  <div class="row" style="margin-top:8px;">
-    <div>
-      <label>Cambiar cámara (durante escaneo)</label>
-      <select id="cameraSelectLive"><option value="">(seleccioná una cámara)</option></select>
->>>>>>> d10e0654fbe42515902202b576a40836b109c5a3
     </div>
-  </div>
-
-  <div class="right">
-    <button id="btnTorch" class="warn" disabled>Linterna</button>
-    <button id="btnManageCodes">Gestionar códigos</button>
-    <button id="btnNextCart">Siguiente carro</button>
-    <button id="btnFinish">Finalizar escaneo</button>
-    <button id="btnCancel" class="warn">Cancelar</button>
-  </div>
-  <div id="info" class="hl" style="margin-top:8px"></div>
-</div>
 
     <!-- Resumen -->
     <div class="card" id="resumen" style="display:none;">
@@ -106,39 +72,11 @@
         <button id="btnSave">Guardar en Google Sheet</button>
         <button id="btnNew">Nuevo vuelo</button>
       </div>
-<<<<<<< HEAD
       <div class="muted">
         Se guarda en una sola fila: Día, Vuelo, Maletero, Total y todos los códigos (cada uno en su propia celda).
       </div>
-=======
-      <div class="muted">Se guarda en una sola fila: Día, Vuelo, Maletero y todos los códigos separados por comas.</div>
     </div>
   </div>
-
-<div id="confirmModal" class="modal" style="display:none;">
-  <div class="modal-inner">
-    <h3>Confirmar / editar código</h3>
-    <div class="muted" style="margin-bottom:4px;">Podés corregirlo manualmente si el lector falló.</div>
-    <input id="codeEdit" class="code-input" autocomplete="off" />
-    <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado</div>
-    <div class="right" style="justify-content:flex-end;">
-      <button id="btnRetry" class="warn">Reintentar</button>
-      <button id="btnAccept">Guardar</button>
->>>>>>> d10e0654fbe42515902202b576a40836b109c5a3
-    </div>
-  </div>
-</div>
-<!-- Modal gestor de códigos -->
-<div id="codesModal" class="modal" style="display:none;">
-  <div class="modal-inner">
-    <h3>Gestor de códigos</h3>
-    <div class="muted" style="margin-bottom:6px;">Tocá 🗑️ para eliminar (pide doble confirmación).</div>
-    <div id="codesList" style="max-height:60vh; overflow:auto;"></div>
-    <div class="right" style="justify-content:flex-end;">
-      <button id="btnCloseCodes">Cerrar</button>
-    </div>
-  </div>
-</div>
 
   <!-- Modal de confirmación con edición -->
   <div id="confirmModal" class="modal" style="display:none;">
