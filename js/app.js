@@ -1,4 +1,4 @@
-// js/app.js (sin carros + overlay verde)
+// js/app.js (sin carros + overlay verde + sesión local con recuperación + editar código)
 (function(){
   let reader;
   let streamTrack;
@@ -8,17 +8,74 @@
   // overlay
   let overlay, octx, video, rafId = null, detector = null;
 
-  // Códigos únicos
+  // estado
   let allCodes = new Set();
-
-  // Modal
   let confirming = false;
 
-  // Sonidos
+  // sesión local (persistencia)
+  const SESSION_KEY = 'fbscan_session';
+  const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h (podés cambiarlo)
+
+  // sonidos
   const soundOk  = new Audio('sounds/beep_ok.wav');
   const soundErr = new Audio('sounds/beep_err.wav');
 
   const $ = sel => document.querySelector(sel);
+
+  // ====== Persistencia local ======
+  function saveSession(stage){
+    const payload = {
+      ts: Date.now(),
+      stage: stage || getCurrentStage(), // 'scan' | 'summary' | 'form'
+      day: $("#dia")?.value?.trim() || '',
+      flight: $("#vuelo")?.value?.trim() || '',
+      porter: $("#maletero")?.value?.trim() || '',
+      codes: Array.from(allCodes)
+    };
+    try{ localStorage.setItem(SESSION_KEY, JSON.stringify(payload)); }catch{}
+  }
+  function clearSession(){
+    try{ localStorage.removeItem(SESSION_KEY); }catch{}
+  }
+  function getCurrentStage(){
+    if($("#scanner").style.display !== 'none') return 'scan';
+    if($("#resumen").style.display !== 'none') return 'summary';
+    return 'form';
+  }
+  function tryRestoreSession(){
+    let data = null;
+    try{ data = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }catch{}
+    if(!data) return false;
+    if(Date.now() - (data.ts||0) > SESSION_TTL_MS){ clearSession(); return false; }
+
+    const hasBasics = !!(data.day && data.flight && data.porter);
+    if(!hasBasics){ clearSession(); return false; }
+
+    const want = confirm(
+      `Se encontró una sesión anterior de ${data.flight} (${data.day}).\n`+
+      `Códigos guardados: ${Array.isArray(data.codes)?data.codes.length:0}.\n\n`+
+      `¿Querés continuar donde estabas?`
+    );
+    if(!want) return false;
+
+    // Restaurar campos y códigos
+    $("#dia").value = data.day;
+    $("#vuelo").value = data.flight;
+    $("#maletero").value = data.porter;
+    allCodes = new Set(Array.isArray(data.codes) ? data.codes : []);
+
+    if(data.stage === 'summary'){
+      // Restaurar a Resumen
+      $("#form").style.display = "none";
+      $("#scanner").style.display = "none";
+      $("#resumen").style.display = "block";
+      renderResumen();
+    } else {
+      // Restaurar a Escaneo
+      iniciar(true); // restore=true
+    }
+    return true;
+  }
 
   // ====== Cámara ======
   async function getVideoInputsFallback(){
@@ -38,6 +95,7 @@
         devs = await getVideoInputsFallback();
       }
 
+      // selector inicial
       const selInit = $("#cameraSelect");
       if (selInit) {
         selInit.innerHTML = "";
@@ -51,6 +109,7 @@
         selInit.value = env?.deviceId || (devs[0]?.deviceId || "");
       }
 
+      // selector en vivo
       const selLive = $("#cameraSelectLive");
       if (selLive) {
         selLive.innerHTML = "";
@@ -88,7 +147,6 @@
     octx.shadowColor = '#00c853';
     detections.forEach(d=>{
       const r = d.boundingBox;
-      // algunos navegadores devuelven DOMRect en coordenadas del elemento video
       octx.beginPath();
       octx.rect(r.x, r.y, r.width, r.height);
       octx.stroke();
@@ -104,7 +162,6 @@
         const dets = await detector.detect(video);
         drawBoxes(dets);
       }catch{
-        // si falla, limpiamos overlay
         octx && octx.clearRect(0,0,overlay.width,overlay.height);
       }
       rafId = requestAnimationFrame(tick);
@@ -112,7 +169,7 @@
     rafId = requestAnimationFrame(tick);
   }
 
-  // ====== ZXing ======
+  // ====== ZXing + arranque de decodificación ======
   async function restartScan(){
     if(reader){ try{ reader.reset(); }catch{} }
     reader = new ZXing.BrowserMultiFormatReader();
@@ -120,11 +177,9 @@
     overlay = $("#overlay");
     octx = overlay.getContext('2d');
 
-    // ajustar overlay a tamaño del video renderizado
     sizeOverlayToVideo();
     new ResizeObserver(sizeOverlayToVideo).observe(video);
 
-    // BarcodeDetector nativo (para dibujar los recuadros)
     if ('BarcodeDetector' in window) {
       try{
         detector = new BarcodeDetector({
@@ -138,7 +193,6 @@
       }catch{ detector = null; }
     } else {
       detector = null;
-      // sin detector: overlay queda limpio hasta que haya lectura (flash de borde)
       octx.clearRect(0,0,overlay.width,overlay.height);
     }
 
@@ -147,13 +201,11 @@
       const raw = String(result.text || "").trim();
       if(!raw) return;
 
-      // si no hay BarcodeDetector, dar feedback visual rápido
       if(!detector){
         $("#preview").classList.add('video-glow');
         setTimeout(()=> $("#preview").classList.remove('video-glow'), 250);
       }
 
-      // abrir modal con input editable
       confirming = true;
       $("#codeEdit").value = raw;
 
@@ -196,7 +248,7 @@
   }
 
   // ====== Flujo ======
-  async function iniciar(){
+  async function iniciar(restore=false){
     const vuelo    = $("#vuelo").value.trim();
     const dia      = $("#dia").value.trim();
     const maletero = $("#maletero").value.trim();
@@ -205,9 +257,9 @@
       return;
     }
 
-    allCodes = new Set();
+    if(!restore){ allCodes = new Set(); } // si es restore, ya viene cargado
     $("#badgeVuelo").textContent    = "Vuelo " + vuelo;
-    $("#badgeContador").textContent = "0 valijas";
+    $("#badgeContador").textContent = `${allCodes.size} valijas`;
 
     $("#form").style.display    = "none";
     $("#scanner").style.display = "block";
@@ -215,10 +267,13 @@
     deviceId = $("#cameraSelect").value || deviceId || null;
     await restartScan();
     await listarCamaras();
+
+    saveSession('scan');
   }
 
   function actualizarContador(){
     $("#badgeContador").textContent = `${allCodes.size} valijas`;
+    saveSession('scan');
   }
 
   function renderResumen(){
@@ -275,11 +330,13 @@
     if(reader){ try{ reader.reset(); }catch{} }
     if(rafId) cancelAnimationFrame(rafId);
     octx && octx.clearRect(0,0,overlay.width,overlay.height);
+    saveSession('summary');
   }
 
   function cancelar(){
     if(reader){ try{ reader.reset(); }catch{} }
     if(rafId) cancelAnimationFrame(rafId);
+    clearSession();
     location.reload();
   }
 
@@ -294,7 +351,7 @@
     }
   }
 
-  // ====== Modal ======
+  // ====== Modal (alta de código desde lectura) ======
   function hideConfirm(){
     $("#confirmModal").style.display = "none";
     confirming = false;
@@ -311,7 +368,7 @@
       try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
       alert("Código duplicado: " + edited);
       if(navigator.vibrate) navigator.vibrate(200);
-      return; // mantener modal
+      return; // mantener modal para corregir
     }
     try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
     allCodes.add(edited);
@@ -324,7 +381,7 @@
     hideConfirm();
   }
 
-  // ====== Gestor de códigos ======
+  // ====== Gestor de códigos (editar + eliminar) ======
   function openCodesManager(){
     const cont = $("#codesList");
     cont.innerHTML = "";
@@ -342,10 +399,40 @@
         const left = document.createElement('div');
         left.innerHTML = `<span>${code}</span> <small>#${idx+1}</small>`;
 
-        const del = document.createElement('button');
-        del.className = 'code-del';
-        del.textContent = '🗑️';
-        del.addEventListener('click', ()=>{
+        // Botones: editar y eliminar
+        const actions = document.createElement('div');
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'code-del'; // reuso estilo (rojo) o podés crear uno amarillo
+        editBtn.style.background = '#f39c12';
+        editBtn.textContent = '✏️';
+        editBtn.title = 'Editar código';
+        editBtn.addEventListener('click', ()=>{
+          const nuevo = prompt('Modificar código:', code);
+          if(nuevo === null) return; // cancelado
+          const newCode = String(nuevo).trim();
+          if(!newCode){
+            try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
+            alert('Código vacío');
+            return;
+          }
+          if(newCode !== code && allCodes.has(newCode)){
+            try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
+            alert('Ese código ya existe');
+            return;
+          }
+          allCodes.delete(code);
+          allCodes.add(newCode);
+          try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+          actualizarContador();
+          openCodesManager(); // refrescar
+        });
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'code-del';
+        delBtn.textContent = '🗑️';
+        delBtn.title = 'Eliminar código';
+        delBtn.addEventListener('click', ()=>{
           const c1 = confirm(`¿Eliminar el código ${code}?`);
           if(!c1) return;
           const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
@@ -353,11 +440,14 @@
 
           allCodes.delete(code);
           actualizarContador();
-          openCodesManager(); // refrescar lista
+          openCodesManager(); // refrescar
         });
 
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+
         row.appendChild(left);
-        row.appendChild(del);
+        row.appendChild(actions);
         cont.appendChild(row);
       });
     }
@@ -388,13 +478,18 @@
       });
       let ok = false;
       try { ok = !!(await res.json())?.ok; } catch {}
-      if (ok) { alert("Guardado en Google Sheet ✔️"); return; }
+      if (ok) {
+        alert("Guardado en Google Sheet ✔️");
+        clearSession(); // ya guardado: limpiamos sesión
+        return;
+      }
     }catch{}
 
     // Fallback no-CORS
     try{
       await fetch(WEBAPP_URL, { method:"POST", mode:"no-cors", body: JSON.stringify(payload) });
       alert("Guardado enviado ✔️\nVerificá la hoja DATA para confirmar la fila.");
+      clearSession(); // asumimos guardado exitoso
     }catch(e2){
       alert("No se pudo guardar en Sheet: " + e2.message);
     }
@@ -402,12 +497,12 @@
 
   // ====== Eventos ======
   document.addEventListener('DOMContentLoaded', async ()=>{
-    $("#btnStart").addEventListener('click', iniciar);
+    $("#btnStart").addEventListener('click', ()=>iniciar(false));
     $("#btnFinish").addEventListener('click', finalizar);
     $("#btnCancel").addEventListener('click', cancelar);
     $("#btnTorch").addEventListener('click', toggleTorch);
     $("#btnSave").addEventListener('click', guardarEnSheet);
-    $("#btnNew").addEventListener('click', ()=>location.reload());
+    $("#btnNew").addEventListener('click', ()=>{ clearSession(); location.reload(); });
 
     $("#btnAccept").addEventListener('click', acceptCode);
     $("#btnRetry").addEventListener('click', retryCode);
@@ -420,7 +515,17 @@
       await restartScan();
     });
 
+    // Pre-autorización de cámara para listar labels
     try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
     await listarCamaras();
+
+    // Intentar restaurar sesión
+    tryRestoreSession();
+
+    // Autosave básico cuando cambian campos
+    ["#vuelo","#dia","#maletero"].forEach(id=>{
+      $(id).addEventListener('change', ()=> saveSession(getCurrentStage()));
+      $(id).addEventListener('input',  ()=> saveSession(getCurrentStage()));
+    });
   });
 })();
