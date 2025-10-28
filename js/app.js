@@ -1,4 +1,4 @@
-// js/app.js (sin carros + overlay verde + sesión local con recuperación + editar código)
+// js/app.js (sin carros + overlay verde + sesión local con recuperación + editar/eliminar)
 (function(){
   let reader;
   let streamTrack;
@@ -403,7 +403,7 @@
         const actions = document.createElement('div');
 
         const editBtn = document.createElement('button');
-        editBtn.className = 'code-del'; // reuso estilo (rojo) o podés crear uno amarillo
+        editBtn.className = 'code-del'; // reuso estilo (rojo) pero en naranja
         editBtn.style.background = '#f39c12';
         editBtn.textContent = '✏️';
         editBtn.title = 'Editar código';

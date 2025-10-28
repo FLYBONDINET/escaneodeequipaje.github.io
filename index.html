@@ -45,8 +45,11 @@
         <div><span class="pill" id="badgeContador">0 valijas</span></div>
       </div>
 
-   <video id="preview" playsinline muted></video>
-  <canvas id="overlay"></canvas>
+      <!-- ⬇️ IMPORTANTE: video + canvas dentro del wrapper para el overlay -->
+      <div class="video-wrap">
+        <video id="preview" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
 
       <div class="row" style="margin-top:8px;">
         <div>
@@ -100,7 +103,7 @@
     <div class="modal-inner">
       <h3>Gestor de códigos</h3>
       <div class="muted" style="margin-bottom:6px;">
-        Tocá 🗑️ para eliminar (pide doble confirmación).
+        Tocá 🗑️ para eliminar (pide doble confirmación) o ✏️ para editar.
       </div>
       <div id="codesList" style="max-height:60vh; overflow:auto;"></div>
       <div class="right" style="justify-content:flex-end;">
