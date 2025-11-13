@@ -1,11 +1,11 @@
-// js/app.js (sin carros + overlay verde)
+// js/app.js (sin carros + overlay verde + overlay guardado)
 (function(){
   let reader;
   let streamTrack;
   let torchOn = false;
   let deviceId = null;
 
-  // overlay
+  // overlay scanner
   let overlay, octx, video, rafId = null, detector = null;
 
   // Códigos únicos
@@ -19,6 +19,35 @@
   const soundErr = new Audio('sounds/beep_err.wav');
 
   const $ = sel => document.querySelector(sel);
+
+  // ====== Helpers para bloqueo global mientras guarda ======
+  function setInputsDisabled(disabled){
+    const elems = document.querySelectorAll('button, input, select, textarea');
+    elems.forEach(el=>{
+      if(disabled){
+        // guardo estado anterior para no habilitar algo que ya estaba deshabilitado
+        el.dataset.prevDisabled = el.disabled ? '1' : '0';
+        el.disabled = true;
+      }else{
+        if(el.dataset.prevDisabled === '0'){
+          el.disabled = false;
+        }
+        delete el.dataset.prevDisabled;
+      }
+    });
+  }
+
+  function showSavingOverlay(){
+    const ov = document.getElementById('savingOverlay');
+    if(ov) ov.style.display = 'flex';
+    setInputsDisabled(true);
+  }
+
+  function hideSavingOverlay(){
+    const ov = document.getElementById('savingOverlay');
+    if(ov) ov.style.display = 'none';
+    setInputsDisabled(false);
+  }
 
   // ====== Cámara ======
   async function getVideoInputsFallback(){
@@ -67,7 +96,7 @@
     }
   }
 
-  // ====== Overlay ======
+  // ====== Overlay scanner ======
   function sizeOverlayToVideo(){
     if(!overlay || !video) return;
     const rect = video.getBoundingClientRect();
@@ -88,7 +117,6 @@
     octx.shadowColor = '#00c853';
     detections.forEach(d=>{
       const r = d.boundingBox;
-      // algunos navegadores devuelven DOMRect en coordenadas del elemento video
       octx.beginPath();
       octx.rect(r.x, r.y, r.width, r.height);
       octx.stroke();
@@ -104,7 +132,6 @@
         const dets = await detector.detect(video);
         drawBoxes(dets);
       }catch{
-        // si falla, limpiamos overlay
         octx && octx.clearRect(0,0,overlay.width,overlay.height);
       }
       rafId = requestAnimationFrame(tick);
@@ -120,11 +147,9 @@
     overlay = $("#overlay");
     octx = overlay.getContext('2d');
 
-    // ajustar overlay a tamaño del video renderizado
     sizeOverlayToVideo();
     new ResizeObserver(sizeOverlayToVideo).observe(video);
 
-    // BarcodeDetector nativo (para dibujar los recuadros)
     if ('BarcodeDetector' in window) {
       try{
         detector = new BarcodeDetector({
@@ -138,7 +163,6 @@
       }catch{ detector = null; }
     } else {
       detector = null;
-      // sin detector: overlay queda limpio hasta que haya lectura (flash de borde)
       octx.clearRect(0,0,overlay.width,overlay.height);
     }
 
@@ -147,13 +171,11 @@
       const raw = String(result.text || "").trim();
       if(!raw) return;
 
-      // si no hay BarcodeDetector, dar feedback visual rápido
       if(!detector){
         $("#preview").classList.add('video-glow');
         setTimeout(()=> $("#preview").classList.remove('video-glow'), 250);
       }
 
-      // abrir modal con input editable
       confirming = true;
       $("#codeEdit").value = raw;
 
@@ -166,7 +188,6 @@
       $("#codeEdit").select();
     });
 
-    // Torch / autofocus / tap-to-focus
     const stream = video.srcObject;
     const tracks = stream ? stream.getVideoTracks() : [];
     streamTrack = tracks[0];
@@ -311,7 +332,7 @@
       try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
       alert("Código duplicado: " + edited);
       if(navigator.vibrate) navigator.vibrate(200);
-      return; // mantener modal
+      return;
     }
     try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
     allCodes.add(edited);
@@ -353,7 +374,7 @@
 
           allCodes.delete(code);
           actualizarContador();
-          openCodesManager(); // refrescar lista
+          openCodesManager();
         });
 
         row.appendChild(left);
@@ -368,7 +389,11 @@
 
   // ====== Guardar en Sheets ======
   async function guardarEnSheet(){
-    if(!WEBAPP_URL){ alert("No hay WebApp configurada (editá js/config.js)"); return; }
+    if(!WEBAPP_URL){
+      alert("No hay WebApp configurada (editá js/config.js)");
+      return;
+    }
+
     const payload = {
       day: $("#dia").value.trim(),
       flight: $("#vuelo").value.trim(),
@@ -377,26 +402,47 @@
       codes: Array.from(allCodes)
     };
 
-    // Intento con CORS
+    showSavingOverlay(); // bloqueamos todo y mostramos “reloj”
     try{
-      const res = await fetch(WEBAPP_URL, {
-        method: "POST",
-        mode: "cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        cache: "no-store",
-      });
-      let ok = false;
-      try { ok = !!(await res.json())?.ok; } catch {}
-      if (ok) { alert("Guardado en Google Sheet ✔️"); return; }
-    }catch{}
+      // Intento con CORS (respuesta JSON con { ok: true })
+      try{
+        const res = await fetch(WEBAPP_URL, {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        });
 
-    // Fallback no-CORS
-    try{
-      await fetch(WEBAPP_URL, { method:"POST", mode:"no-cors", body: JSON.stringify(payload) });
-      alert("Guardado enviado ✔️\nVerificá la hoja DATA para confirmar la fila.");
-    }catch(e2){
-      alert("No se pudo guardar en Sheet: " + e2.message);
+        let ok = false;
+        try {
+          const data = await res.json();
+          ok = !!(data && (data.ok || data.success));
+        } catch(eJson){
+          ok = false;
+        }
+
+        if(ok){
+          alert("Guardado realizado ✔️");
+          return; // el finally igual va a ocultar el overlay
+        }
+      }catch(e){
+        // si explota el CORS, seguimos al fallback
+      }
+
+      // Fallback no-CORS (no tenemos confirmación real, solo que el request salió)
+      try{
+        await fetch(WEBAPP_URL, {
+          method:"POST",
+          mode:"no-cors",
+          body: JSON.stringify(payload)
+        });
+        alert("Guardado enviado ✔️\nVerificá la hoja DATA para confirmar la fila.");
+      }catch(e2){
+        alert("No se pudo guardar en Sheet: " + e2.message);
+      }
+    }finally{
+      hideSavingOverlay(); // siempre sacamos el overlay al terminar
     }
   }
 

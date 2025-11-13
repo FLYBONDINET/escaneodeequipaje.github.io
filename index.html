@@ -45,8 +45,10 @@
         <div><span class="pill" id="badgeContador">0 valijas</span></div>
       </div>
 
-   <video id="preview" playsinline muted></video>
-  <canvas id="overlay"></canvas>
+      <div class="video-wrap">
+        <video id="preview" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
 
       <div class="row" style="margin-top:8px;">
         <div>
@@ -74,8 +76,7 @@
         <button id="btnNew">Nuevo vuelo</button>
       </div>
       <div class="muted">
-        Se guarda en una sola fila: Día, Vuelo, Maletero, Total y todos los códigos (cada uno en su propia celda).
-      </div>
+              </div>
     </div>
   </div>
 
@@ -106,6 +107,14 @@
       <div class="right" style="justify-content:flex-end;">
         <button id="btnCloseCodes">Cerrar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Overlay bloqueante mientras guarda -->
+  <div id="savingOverlay" class="saving-overlay" style="display:none;">
+    <div class="saving-box">
+      <div class="spinner"></div>
+      <p>Guardando datos en Google Sheets...</p>
     </div>
   </div>
 
