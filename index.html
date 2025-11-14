@@ -14,10 +14,6 @@
     <div class="card" id="form">
       <div class="row">
         <div>
-          <label>Número de vuelo</label>
-          <input id="vuelo" placeholder="Ej: FO501" autocomplete="off">
-        </div>
-        <div>
           <label>Día (YYYY-MM-DD)</label>
           <input id="dia" type="date">
         </div>
@@ -26,7 +22,19 @@
           <input id="maletero" placeholder="Nombre y apellido">
         </div>
       </div>
-      <div class="row">
+
+      <div class="flight-config">
+        <div class="flight-config-header">
+          <label>Vuelos a escanear (hasta 20)</label>
+          <button type="button" id="btnAddFlightRow">Agregar vuelo</button>
+        </div>
+        <div id="flightRows"></div>
+        <div class="muted">
+          Completá número de vuelo y destino. Podés cargar 1 o varios vuelos.
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
         <div>
           <label>Elegir cámara</label>
           <select id="cameraSelect">
@@ -38,7 +46,7 @@
       <div class="muted">Consejo: tocá el video para forzar el autofocus en algunos móviles.</div>
     </div>
 
-    <!-- Escaneo (SIN CARROS) -->
+    <!-- Escaneo -->
     <div class="card" id="scanner" style="display:none;">
       <div class="row">
         <div><span class="pill" id="badgeVuelo">Vuelo —</span></div>
@@ -59,24 +67,31 @@
         </div>
       </div>
 
+      <!-- Panel de vuelos y conteos -->
+      <div class="flights-panel-title">
+        Vuelos y bolsas
+      </div>
+      <div class="flights-panel" id="flightsPanel"></div>
+
       <div class="right">
         <button id="btnTorch" class="warn" disabled>Linterna</button>
-        <button id="btnManageCodes">Gestionar códigos</button>
+        <button id="btnManageCodes">Gestionar códigos vuelo actual</button>
         <button id="btnFinish">Finalizar escaneo</button>
         <button id="btnCancel" class="warn">Cancelar</button>
       </div>
     </div>
 
-    <!-- Resumen -->
+    <!-- Resumen final -->
     <div class="card" id="resumen" style="display:none;">
-      <h3>Resumen</h3>
+      <h3>Resumen de todos los vuelos</h3>
       <div id="res"></div>
       <div class="right">
-        <button id="btnSave">Guardar en Google Sheet</button>
-        <button id="btnNew">Nuevo vuelo</button>
+        <button id="btnSave">Info</button>
+        <button id="btnNew">Nuevo escaneo</button>
       </div>
       <div class="muted">
-              </div>
+        Ahora el guardado se realiza vuelo por vuelo desde el panel lateral (tilde verde).
+      </div>
     </div>
   </div>
 
@@ -88,7 +103,11 @@
         Podés corregirlo manualmente si el lector falló.
       </div>
       <input id="codeEdit" class="code-input" autocomplete="off" />
-      <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado</div>
+      <div style="margin-top:8px;">
+        <label>Vuelo para este bag</label>
+        <select id="codeFlightSelect"></select>
+      </div>
+      <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado (en toda la sesión)</div>
       <div class="right" style="justify-content:flex-end;">
         <button id="btnRetry" class="warn">Reintentar</button>
         <button id="btnAccept">Guardar</button>
@@ -96,16 +115,45 @@
     </div>
   </div>
 
-  <!-- Modal gestor de códigos -->
+  <!-- Modal gestor de códigos (vuelo actual o elegido) -->
   <div id="codesModal" class="modal" style="display:none;">
     <div class="modal-inner">
-      <h3>Gestor de códigos</h3>
+      <h3 id="codesModalTitle">Gestor de códigos</h3>
       <div class="muted" style="margin-bottom:6px;">
         Tocá 🗑️ para eliminar (pide doble confirmación).
       </div>
       <div id="codesList" style="max-height:60vh; overflow:auto;"></div>
       <div class="right" style="justify-content:flex-end;">
         <button id="btnCloseCodes">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para cerrar vuelo (babies y total final) -->
+  <div id="closeFlightModal" class="modal" style="display:none;">
+    <div class="modal-inner">
+      <h3 id="closeFlightTitle">Cerrar vuelo</h3>
+      <p id="closeFlightInfo" class="muted"></p>
+
+      <div style="margin-top:10px;">
+        <div>
+          <strong>Valijas despachadas: <span id="closeFlightBags">0</span></strong>
+        </div>
+        <div class="muted" style="margin-top:4px;">
+          Si no hay babies, dejá 0.
+        </div>
+        <div style="margin-top:8px;">
+          <label>Cantidad de babies</label>
+          <input id="closeFlightBaby" type="number" min="0" value="0" style="width:80px;">
+        </div>
+        <div style="margin-top:8px;">
+          <strong>Total final: <span id="closeFlightTotalFinal">0</span></strong>
+        </div>
+      </div>
+
+      <div class="right" style="justify-content:flex-end;margin-top:12px;">
+        <button id="btnCloseFlightCancel" class="warn">Cancelar</button>
+        <button id="btnCloseFlightSave">Guardar vuelo</button>
       </div>
     </div>
   </div>

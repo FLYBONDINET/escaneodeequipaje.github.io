@@ -1,4 +1,4 @@
-// js/app.js (sin carros + overlay verde + overlay guardado)
+// js/app.js (multi-vuelo, overlay verde y guardado por vuelo)
 (function(){
   let reader;
   let streamTrack;
@@ -8,10 +8,18 @@
   // overlay scanner
   let overlay, octx, video, rafId = null, detector = null;
 
-  // Códigos únicos
-  let allCodes = new Set();
+  // Modelo de datos
+  // flights: [{id, number, dest, codes:Set, babies, totalFinal, closed, saved}]
+  let flights = [];
+  let currentFlightId = null;
+  let lastFlightId = null;
+  let closingFlight = null;
+  let managerFlightId = null;
 
-  // Modal
+  // Códigos únicos globales (para evitar duplicados entre vuelos)
+  let allCodesGlobal = new Set();
+
+  // Modal código
   let confirming = false;
 
   // Sonidos
@@ -20,12 +28,11 @@
 
   const $ = sel => document.querySelector(sel);
 
-  // ====== Helpers para bloqueo global mientras guarda ======
+  // ====== Helpers bloqueo global ======
   function setInputsDisabled(disabled){
     const elems = document.querySelectorAll('button, input, select, textarea');
     elems.forEach(el=>{
       if(disabled){
-        // guardo estado anterior para no habilitar algo que ya estaba deshabilitado
         el.dataset.prevDisabled = el.disabled ? '1' : '0';
         el.disabled = true;
       }else{
@@ -47,6 +54,104 @@
     const ov = document.getElementById('savingOverlay');
     if(ov) ov.style.display = 'none';
     setInputsDisabled(false);
+  }
+
+  // ====== Utilidad vuelos ======
+  function getFlightById(id){
+    return flights.find(f => f.id === id) || null;
+  }
+
+  function setCurrentFlight(id){
+    const f = getFlightById(id);
+    if(!f || f.closed) return;
+    currentFlightId = id;
+    lastFlightId = id;
+    actualizarContador();
+  }
+
+  function updateFlightSelectInModal(){
+    const sel = $("#codeFlightSelect");
+    if(!sel) return;
+    sel.innerHTML = "";
+    flights.filter(f => !f.closed).forEach(f=>{
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      opt.textContent = f.number + (f.dest ? ` (${f.dest})` : '');
+      sel.appendChild(opt);
+    });
+    if(lastFlightId && getFlightById(lastFlightId) && !getFlightById(lastFlightId).closed){
+      sel.value = lastFlightId;
+    }else if(flights.filter(f=>!f.closed).length){
+      sel.value = flights.filter(f=>!f.closed)[0].id;
+    }
+  }
+
+  function renderFlightsPanel(){
+    const panel = $("#flightsPanel");
+    if(!panel) return;
+    panel.innerHTML = "";
+
+    const openFlights = flights.filter(f => !f.closed);
+    if(openFlights.length === 0){
+      const div = document.createElement('div');
+      div.className = 'muted';
+      div.textContent = '(No hay vuelos abiertos. Podés finalizar el escaneo.)';
+      panel.appendChild(div);
+      return;
+    }
+
+    openFlights.forEach(f=>{
+      const pill = document.createElement('div');
+      pill.className = 'flight-pill';
+      pill.dataset.id = f.id;
+
+      const head = document.createElement('div');
+      head.className = 'flight-pill-header';
+      const title = document.createElement('span');
+      title.textContent = f.number;
+      const dest = document.createElement('span');
+      dest.className = 'flight-pill-dest';
+      dest.textContent = f.dest || '';
+      head.appendChild(title);
+      head.appendChild(dest);
+
+      const count = document.createElement('div');
+      count.className = 'flight-pill-count';
+      count.textContent = `Bolsas: ${f.codes.size}`;
+
+      const actions = document.createElement('div');
+      actions.className = 'flight-pill-actions';
+      const btnView = document.createElement('button');
+      btnView.className = 'flight-view-btn';
+      btnView.textContent = 'Ver códigos';
+      btnView.addEventListener('click', ()=>{
+        managerFlightId = f.id;
+        openCodesManagerForFlight(f.id);
+      });
+
+      const btnClose = document.createElement('button');
+      btnClose.className = 'flight-close-btn';
+      btnClose.textContent = '✔';
+      btnClose.title = 'Cerrar vuelo';
+      btnClose.addEventListener('click', ()=>{
+        openCloseFlightModal(f.id);
+      });
+
+      actions.appendChild(btnView);
+      actions.appendChild(btnClose);
+
+      pill.appendChild(head);
+      pill.appendChild(count);
+      pill.appendChild(actions);
+
+      pill.addEventListener('click', (ev)=>{
+        // si clic en botones, no cambiar vuelo
+        if(ev.target === btnView || ev.target === btnClose) return;
+        setCurrentFlight(f.id);
+      });
+
+      panel.appendChild(pill);
+    });
   }
 
   // ====== Cámara ======
@@ -178,8 +283,9 @@
 
       confirming = true;
       $("#codeEdit").value = raw;
+      updateFlightSelectInModal();
 
-      const isDup = allCodes.has(raw);
+      const isDup = allCodesGlobal.has(raw);
       $("#dupWarn").style.display = isDup ? 'block' : 'none';
       if(isDup){ try{ soundErr.currentTime = 0; soundErr.play(); }catch{} }
 
@@ -217,74 +323,127 @@
   }
 
   // ====== Flujo ======
+  function buildFlightsFromForm(){
+    flights = [];
+    allCodesGlobal = new Set();
+    currentFlightId = null;
+    lastFlightId = null;
+
+    const rows = document.querySelectorAll('#flightRows .flight-row');
+    let idx = 0;
+    rows.forEach(row=>{
+      const num = row.querySelector('.flight-num')?.value.trim() || "";
+      const dest = row.querySelector('.flight-dest')?.value.trim() || "";
+      if(!num) return;
+      const id = `f${idx++}_${Date.now()}`;
+      flights.push({
+        id,
+        number: num,
+        dest,
+        codes: new Set(),
+        babies: 0,
+        totalFinal: 0,
+        closed: false,
+        saved: false
+      });
+    });
+  }
+
   async function iniciar(){
-    const vuelo    = $("#vuelo").value.trim();
     const dia      = $("#dia").value.trim();
     const maletero = $("#maletero").value.trim();
-    if(!vuelo || !dia || !maletero){
-      alert("Completá vuelo, día y maletero");
+    if(!dia || !maletero){
+      alert("Completá día y maletero");
       return;
     }
 
-    allCodes = new Set();
-    $("#badgeVuelo").textContent    = "Vuelo " + vuelo;
-    $("#badgeContador").textContent = "0 valijas";
+    buildFlightsFromForm();
+    if(flights.length === 0){
+      alert("Agregá al menos un vuelo con número.");
+      return;
+    }
+
+    // recordar maletero en localStorage
+    try{ localStorage.setItem('scanner_porter', maletero); }catch(e){}
+
+    currentFlightId = flights[0].id;
+    lastFlightId = currentFlightId;
 
     $("#form").style.display    = "none";
     $("#scanner").style.display = "block";
 
     deviceId = $("#cameraSelect").value || deviceId || null;
+    renderFlightsPanel();
+    actualizarContador();
     await restartScan();
     await listarCamaras();
   }
 
   function actualizarContador(){
-    $("#badgeContador").textContent = `${allCodes.size} valijas`;
+    const f = getFlightById(currentFlightId) || flights.find(fl=>!fl.closed) || null;
+    if(!f){
+      $("#badgeVuelo").textContent = "Sin vuelos activos";
+      $("#badgeContador").textContent = "0 valijas";
+      return;
+    }
+    $("#badgeVuelo").textContent = `Vuelo ${f.number}` + (f.dest ? ` (${f.dest})` : '');
+    $("#badgeContador").textContent = `${f.codes.size} valijas`;
   }
 
   function renderResumen(){
-    const vuelo    = $("#vuelo").value;
     const dia      = $("#dia").value;
     const maletero = $("#maletero").value;
 
     const wrap = document.createElement('div');
-    wrap.style.textAlign = 'center';
+    wrap.style.textAlign = 'left';
 
-    const pDia = document.createElement('div');
-    pDia.style.fontWeight = '700';
-    pDia.style.fontSize = '18px';
-    pDia.textContent = `Día: ${dia}`;
-    wrap.appendChild(pDia);
+    const header = document.createElement('div');
+    header.innerHTML = `<b>Día:</b> ${dia} &nbsp; | &nbsp; <b>Maletero:</b> ${maletero}`;
+    header.style.marginBottom = '10px';
+    wrap.appendChild(header);
 
-    const pVuelo = document.createElement('div');
-    pVuelo.textContent = `Vuelo: ${vuelo}`;
-    wrap.appendChild(pVuelo);
+    if(flights.length === 0){
+      const p = document.createElement('div');
+      p.textContent = 'No se registraron vuelos.';
+      wrap.appendChild(p);
+    }else{
+      flights.forEach(f=>{
+        const block = document.createElement('div');
+        block.style.marginBottom = '12px';
+        block.style.padding = '8px';
+        block.style.borderRadius = '10px';
+        block.style.background = '#fafafa';
+        block.style.border = '1px solid #eee';
 
-    const pMal = document.createElement('div');
-    pMal.textContent = `Maletero: ${maletero}`;
-    wrap.appendChild(pMal);
+        const title = document.createElement('div');
+        title.innerHTML = `<b>${f.number}</b>` + (f.dest ? ` (${f.dest})` : '');
+        block.appendChild(title);
 
-    const pTot = document.createElement('div');
-    pTot.style.margin = '8px 0';
-    pTot.innerHTML = `<b>Total de bags:</b> ${allCodes.size}`;
-    wrap.appendChild(pTot);
+        const info = document.createElement('div');
+        const bags = f.codes.size;
+        const babies = f.babies || 0;
+        const totalFinal = f.totalFinal || (bags + babies);
+        info.innerHTML = `Bolsas: ${bags} &nbsp; | &nbsp; Babies: ${babies} &nbsp; | &nbsp; Total final: ${totalFinal}`;
+        info.style.fontSize = '13px';
+        info.style.marginBottom = '4px';
+        block.appendChild(info);
 
-    const list = document.createElement('div');
-    list.style.textAlign = 'left';
-    list.style.margin = '0 auto';
-    list.style.maxWidth = '540px';
+        if(f.codes.size){
+          const ul = document.createElement('ul');
+          ul.style.margin = '0';
+          ul.style.paddingLeft = '18px';
+          Array.from(f.codes).forEach(code=>{
+            const li = document.createElement('li');
+            li.textContent = code;
+            ul.appendChild(li);
+          });
+          block.appendChild(ul);
+        }
 
-    const ul = document.createElement('ul');
-    ul.style.margin = '0';
-    ul.style.paddingLeft = '18px';
-    Array.from(allCodes).forEach(code=>{
-      const li = document.createElement('li');
-      li.textContent = code;
-      ul.appendChild(li);
-    });
-    list.appendChild(ul);
+        wrap.appendChild(block);
+      });
+    }
 
-    wrap.appendChild(list);
     $("#res").innerHTML = '';
     $("#res").appendChild(wrap);
   }
@@ -315,7 +474,7 @@
     }
   }
 
-  // ====== Modal ======
+  // ====== Modal código ======
   function hideConfirm(){
     $("#confirmModal").style.display = "none";
     confirming = false;
@@ -323,20 +482,34 @@
 
   function acceptCode(){
     const edited = ($("#codeEdit").value || "").trim();
+    const flightId = $("#codeFlightSelect").value;
+    const flight = getFlightById(flightId);
+
     if(!edited){
       try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
       alert("Código vacío.");
       return;
     }
-    if(allCodes.has(edited)){
+    if(!flight){
+      alert("Seleccioná un vuelo válido.");
+      return;
+    }
+    if(allCodesGlobal.has(edited)){
       try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
-      alert("Código duplicado: " + edited);
+      alert("Código duplicado en la sesión: " + edited);
       if(navigator.vibrate) navigator.vibrate(200);
       return;
     }
+
     try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
-    allCodes.add(edited);
+    allCodesGlobal.add(edited);
+    flight.codes.add(edited);
+
+    currentFlightId = flight.id;
+    lastFlightId = flight.id;
+
     actualizarContador();
+    renderFlightsPanel();
     hideConfirm();
   }
 
@@ -345,18 +518,32 @@
     hideConfirm();
   }
 
-  // ====== Gestor de códigos ======
-  function openCodesManager(){
+  // ====== Gestor de códigos por vuelo ======
+  function openCodesManagerForFlight(flightId){
+    const flight = getFlightById(flightId);
     const cont = $("#codesList");
-    cont.innerHTML = "";
+    const titleEl = $("#codesModalTitle");
 
-    if(allCodes.size === 0){
+    cont.innerHTML = "";
+    if(!flight){
+      titleEl.textContent = "Gestor de códigos";
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = '(vuelo no encontrado)';
+      cont.appendChild(empty);
+      $("#codesModal").style.display = 'flex';
+      return;
+    }
+
+    titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
+
+    if(flight.codes.size === 0){
       const empty = document.createElement('div');
       empty.className = 'muted';
       empty.textContent = '(sin códigos)';
       cont.appendChild(empty);
     } else {
-      Array.from(allCodes).forEach((code, idx)=>{
+      Array.from(flight.codes).forEach((code, idx)=>{
         const row = document.createElement('div');
         row.className = 'code-item';
 
@@ -372,9 +559,11 @@
           const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
           if(!c2) return;
 
-          allCodes.delete(code);
+          flight.codes.delete(code);
+          allCodesGlobal.delete(code);
           actualizarContador();
-          openCodesManager();
+          renderFlightsPanel();
+          openCodesManagerForFlight(flight.id); // refrescar lista
         });
 
         row.appendChild(left);
@@ -385,26 +574,73 @@
 
     $("#codesModal").style.display = 'flex';
   }
-  function closeCodesManager(){ $("#codesModal").style.display = 'none'; }
 
-  // ====== Guardar en Sheets ======
-  async function guardarEnSheet(){
-    if(!WEBAPP_URL){
-      alert("No hay WebApp configurada (editá js/config.js)");
+  function openCodesManager(){
+    const base = currentFlightId || (flights.find(f=>!f.closed)?.id);
+    if(!base){
+      alert("No hay vuelos activos.");
       return;
     }
+    managerFlightId = base;
+    openCodesManagerForFlight(base);
+  }
 
+  function closeCodesManager(){ $("#codesModal").style.display = 'none'; }
+
+  // ====== Cerrar vuelo (babies + guardado Sheets) ======
+  function openCloseFlightModal(flightId){
+    const flight = getFlightById(flightId);
+    if(!flight){
+      alert("Vuelo no encontrado.");
+      return;
+    }
+    if(flight.codes.size === 0){
+      const ok = confirm("Este vuelo no tiene códigos. ¿Cerrar igual?");
+      if(!ok) return;
+    }
+
+    closingFlight = flight;
+
+    $("#closeFlightTitle").textContent =
+      `Cerrar vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
+    $("#closeFlightInfo").textContent =
+      `El vuelo tiene ${flight.codes.size} valijas despachadas. Podés sumar babies si corresponde.`;
+
+    $("#closeFlightBags").textContent = String(flight.codes.size);
+    $("#closeFlightBaby").value = "0";
+    $("#closeFlightTotalFinal").textContent = String(flight.codes.size);
+
+    $("#closeFlightModal").style.display = 'flex';
+  }
+
+  function updateCloseFlightTotal(){
+    if(!closingFlight) return;
+    const bags = closingFlight.codes.size;
+    const babies = parseInt($("#closeFlightBaby").value, 10) || 0;
+    const total = bags + babies;
+    $("#closeFlightTotalFinal").textContent = String(total);
+  }
+
+  async function guardarVueloEnSheet(flight, babies, totalFinal){
+    if(!WEBAPP_URL){
+      alert("No hay WebApp configurada (editá js/config.js)");
+      return false;
+    }
     const payload = {
       day: $("#dia").value.trim(),
-      flight: $("#vuelo").value.trim(),
       porter: $("#maletero").value.trim(),
-      total: allCodes.size,
-      codes: Array.from(allCodes)
+      flight: flight.number,
+      destination: flight.dest,
+      totalBags: flight.codes.size,
+      baby: babies,
+      totalFinal: totalFinal,
+      codes: Array.from(flight.codes)
     };
 
-    showSavingOverlay(); // bloqueamos todo y mostramos “reloj”
+    showSavingOverlay();
     try{
-      // Intento con CORS (respuesta JSON con { ok: true })
+      // Intento CORS
+      let ok = false;
       try{
         const res = await fetch(WEBAPP_URL, {
           method: "POST",
@@ -413,46 +649,134 @@
           body: JSON.stringify(payload),
           cache: "no-store",
         });
-
-        let ok = false;
-        try {
+        try{
           const data = await res.json();
           ok = !!(data && (data.ok || data.success));
-        } catch(eJson){
+        }catch(eJson){
           ok = false;
         }
-
-        if(ok){
-          alert("Guardado realizado ✔️");
-          return; // el finally igual va a ocultar el overlay
-        }
       }catch(e){
-        // si explota el CORS, seguimos al fallback
+        ok = false;
       }
 
-      // Fallback no-CORS (no tenemos confirmación real, solo que el request salió)
+      if(ok){
+        alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.size}, babies: ${babies}, total: ${totalFinal})`);
+        return true;
+      }
+
+      // Fallback no-CORS
       try{
         await fetch(WEBAPP_URL, {
           method:"POST",
           mode:"no-cors",
           body: JSON.stringify(payload)
         });
-        alert("Guardado enviado ✔️\nVerificá la hoja DATA para confirmar la fila.");
+        alert(`Vuelo ${flight.number} enviado ✔️\nVerificá la hoja para confirmar la fila.`);
+        return true;
       }catch(e2){
         alert("No se pudo guardar en Sheet: " + e2.message);
+        return false;
       }
     }finally{
-      hideSavingOverlay(); // siempre sacamos el overlay al terminar
+      hideSavingOverlay();
     }
+  }
+
+  async function onCloseFlightSave(){
+    if(!closingFlight){
+      $("#closeFlightModal").style.display = 'none';
+      return;
+    }
+    const bags = closingFlight.codes.size;
+    const babies = parseInt($("#closeFlightBaby").value, 10) || 0;
+    const totalFinal = bags + babies;
+
+    const ok = await guardarVueloEnSheet(closingFlight, babies, totalFinal);
+    if(ok){
+      closingFlight.babies = babies;
+      closingFlight.totalFinal = totalFinal;
+      closingFlight.closed = true;
+      closingFlight.saved = true;
+
+      $("#closeFlightModal").style.display = 'none';
+      closingFlight = null;
+
+      renderFlightsPanel();
+
+      const remaining = flights.filter(f=>!f.closed);
+      if(remaining.length){
+        setCurrentFlight(remaining[0].id);
+      }else{
+        currentFlightId = null;
+        actualizarContador();
+        alert("Todos los vuelos están cerrados. Podés finalizar el escaneo para ver el resumen.");
+      }
+    }
+  }
+
+  function onCloseFlightCancel(){
+    $("#closeFlightModal").style.display = 'none';
+    closingFlight = null;
+  }
+
+  // ====== Inicializar filas de vuelos en el form ======
+  function addFlightRow(){
+    const container = $("#flightRows");
+    const count = container.querySelectorAll('.flight-row').length;
+    if(count >= 20){
+      alert("Máximo 20 vuelos.");
+      return;
+    }
+    const row = document.createElement('div');
+    row.className = 'flight-row';
+
+    const inputNum = document.createElement('input');
+    inputNum.className = 'flight-num';
+    inputNum.placeholder = 'FO501';
+
+    const inputDest = document.createElement('input');
+    inputDest.className = 'flight-dest';
+    inputDest.placeholder = 'Destino';
+
+    const btnDel = document.createElement('button');
+    btnDel.type = 'button';
+    btnDel.textContent = '🗑️';
+    btnDel.addEventListener('click', ()=>{
+      row.remove();
+    });
+
+    row.appendChild(inputNum);
+    row.appendChild(inputDest);
+    row.appendChild(btnDel);
+    container.appendChild(row);
+  }
+
+  function initDateAndPorter(){
+    const diaInput = $("#dia");
+    if(diaInput && !diaInput.value){
+      const today = new Date().toISOString().slice(0,10);
+      diaInput.value = today;
+    }
+    try{
+      const storedPorter = localStorage.getItem('scanner_porter');
+      if(storedPorter && $("#maletero")){
+        $("#maletero").value = storedPorter;
+      }
+    }catch(e){}
   }
 
   // ====== Eventos ======
   document.addEventListener('DOMContentLoaded', async ()=>{
+    initDateAndPorter();
+
+    // al menos una fila de vuelo
+    addFlightRow();
+
+    $("#btnAddFlightRow").addEventListener('click', addFlightRow);
     $("#btnStart").addEventListener('click', iniciar);
     $("#btnFinish").addEventListener('click', finalizar);
     $("#btnCancel").addEventListener('click', cancelar);
     $("#btnTorch").addEventListener('click', toggleTorch);
-    $("#btnSave").addEventListener('click', guardarEnSheet);
     $("#btnNew").addEventListener('click', ()=>location.reload());
 
     $("#btnAccept").addEventListener('click', acceptCode);
@@ -464,6 +788,15 @@
     $("#cameraSelectLive").addEventListener('change', async (e)=>{
       deviceId = e.target.value || null;
       await restartScan();
+    });
+
+    $("#closeFlightBaby").addEventListener('input', updateCloseFlightTotal);
+    $("#btnCloseFlightSave").addEventListener('click', onCloseFlightSave);
+    $("#btnCloseFlightCancel").addEventListener('click', onCloseFlightCancel);
+
+    // Botón "Guardar en Google Sheet" del resumen ahora solo informa
+    $("#btnSave").addEventListener('click', ()=>{
+      alert("El guardado se realiza cuando cerrás cada vuelo con el tilde verde. El resumen es solo informativo.");
     });
 
     try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
