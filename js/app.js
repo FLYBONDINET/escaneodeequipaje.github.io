@@ -732,11 +732,11 @@
 
     const inputNum = document.createElement('input');
     inputNum.className = 'flight-num';
-    inputNum.placeholder = 'FO501';
+    inputNum.placeholder = '5240';
 
     const inputDest = document.createElement('input');
     inputDest.className = 'flight-dest';
-    inputDest.placeholder = 'Destino';
+    inputDest.placeholder = 'BRC';
 
     const btnDel = document.createElement('button');
     btnDel.type = 'button';
