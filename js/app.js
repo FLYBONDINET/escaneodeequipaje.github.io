@@ -519,61 +519,100 @@
   }
 
   // ====== Gestor de códigos por vuelo ======
-  function openCodesManagerForFlight(flightId){
-    const flight = getFlightById(flightId);
-    const cont = $("#codesList");
-    const titleEl = $("#codesModalTitle");
+function openCodesManagerForFlight(flightId){
+  const flight = getFlightById(flightId);
+  const cont = $("#codesList");
+  const titleEl = $("#codesModalTitle");
 
-    cont.innerHTML = "";
-    if(!flight){
-      titleEl.textContent = "Gestor de códigos";
-      const empty = document.createElement('div');
-      empty.className = 'muted';
-      empty.textContent = '(vuelo no encontrado)';
-      cont.appendChild(empty);
-      $("#codesModal").style.display = 'flex';
-      return;
-    }
-
-    titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
-
-    if(flight.codes.size === 0){
-      const empty = document.createElement('div');
-      empty.className = 'muted';
-      empty.textContent = '(sin códigos)';
-      cont.appendChild(empty);
-    } else {
-      Array.from(flight.codes).forEach((code, idx)=>{
-        const row = document.createElement('div');
-        row.className = 'code-item';
-
-        const left = document.createElement('div');
-        left.innerHTML = `<span>${code}</span> <small>#${idx+1}</small>`;
-
-        const del = document.createElement('button');
-        del.className = 'code-del';
-        del.textContent = '🗑️';
-        del.addEventListener('click', ()=>{
-          const c1 = confirm(`¿Eliminar el código ${code}?`);
-          if(!c1) return;
-          const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
-          if(!c2) return;
-
-          flight.codes.delete(code);
-          allCodesGlobal.delete(code);
-          actualizarContador();
-          renderFlightsPanel();
-          openCodesManagerForFlight(flight.id); // refrescar lista
-        });
-
-        row.appendChild(left);
-        row.appendChild(del);
-        cont.appendChild(row);
-      });
-    }
-
+  cont.innerHTML = "";
+  if(!flight){
+    titleEl.textContent = "Gestor de códigos";
+    const empty = document.createElement('div');
+    empty.className = 'muted';
+    empty.textContent = '(vuelo no encontrado)';
+    cont.appendChild(empty);
     $("#codesModal").style.display = 'flex';
+    return;
   }
+
+  titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
+
+  if(flight.codes.size === 0){
+    const empty = document.createElement('div');
+    empty.className = 'muted';
+    empty.textContent = '(sin códigos)';
+    cont.appendChild(empty);
+  } else {
+    Array.from(flight.codes).forEach((code, idx)=>{
+      const row = document.createElement('div');
+      row.className = 'code-item';
+
+      const left = document.createElement('div');
+      left.innerHTML = `<span>${code}</span> <small>#${idx+1}</small>`;
+
+      // Botón EDITAR (lapiz)
+      const edit = document.createElement('button');
+      edit.className = 'code-edit';
+      edit.textContent = '✏️';
+      edit.title = 'Editar código';
+      edit.addEventListener('click', ()=>{
+        const nuevo = prompt("Editar código escaneado:", code);
+        if(nuevo === null) return; // cancelado
+        const newTrim = (nuevo || "").trim();
+        if(!newTrim){
+          alert("El código no puede quedar vacío.");
+          return;
+        }
+        if(newTrim === code) return;
+
+        if(allCodesGlobal.has(newTrim)){
+          alert("Ya existe otro bag con ese código en esta sesión.");
+          if(navigator.vibrate) navigator.vibrate(200);
+          return;
+        }
+
+        // Actualizar sets
+        flight.codes.delete(code);
+        allCodesGlobal.delete(code);
+        flight.codes.add(newTrim);
+        allCodesGlobal.add(newTrim);
+
+        try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+
+        if(currentFlightId === flight.id){
+          actualizarContador();
+        }
+        renderFlightsPanel();
+        openCodesManagerForFlight(flight.id); // refrescar lista
+      });
+
+      // Botón ELIMINAR (tacho)
+      const del = document.createElement('button');
+      del.className = 'code-del';
+      del.textContent = '🗑️';
+      del.title = 'Eliminar código';
+      del.addEventListener('click', ()=>{
+        const c1 = confirm(`¿Eliminar el código ${code}?`);
+        if(!c1) return;
+        const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
+        if(!c2) return;
+
+        flight.codes.delete(code);
+        allCodesGlobal.delete(code);
+        actualizarContador();
+        renderFlightsPanel();
+        openCodesManagerForFlight(flight.id); // refrescar lista
+      });
+
+      row.appendChild(left);
+      row.appendChild(edit);
+      row.appendChild(del);
+      cont.appendChild(row);
+    });
+  }
+
+  $("#codesModal").style.display = 'flex';
+}
 
   function openCodesManager(){
     const base = currentFlightId || (flights.find(f=>!f.closed)?.id);
