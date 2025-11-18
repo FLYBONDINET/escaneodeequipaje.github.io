@@ -660,66 +660,73 @@ function openCodesManagerForFlight(flightId){
     $("#closeFlightTotalFinal").textContent = String(total);
   }
 
-  async function guardarVueloEnSheet(flight, babies, totalFinal){
-    if(!WEBAPP_URL){
-      alert("No hay WebApp configurada (editá js/config.js)");
-      return false;
-    }
-    const payload = {
-      day: $("#dia").value.trim(),
-      porter: $("#maletero").value.trim(),
-      flight: flight.number,
-      destination: flight.dest,
-      totalBags: flight.codes.size,
-      baby: babies,
-      totalFinal: totalFinal,
-      codes: Array.from(flight.codes)
-    };
+async function guardarVueloEnSheet(flight, babies, totalFinal){
+  if(!WEBAPP_URL){
+    alert("No hay WebApp configurada (editá js/config.js)");
+    return false;
+  }
 
-    showSavingOverlay();
+  const payload = {
+    day: $("#dia").value.trim(),
+    porter: $("#maletero").value.trim(),
+    flight: flight.number,
+    destination: flight.dest,
+
+    // 👇 Campo viejo que usa tu Apps Script para la columna D
+    total: flight.codes.size,
+
+    // 👇 Campos nuevos (por si los querés usar en la hoja)
+    totalBags: flight.codes.size,
+    baby: babies,
+    totalFinal: totalFinal,
+    codes: Array.from(flight.codes)
+  };
+
+  showSavingOverlay();
+  try{
+    // Intento CORS
+    let ok = false;
     try{
-      // Intento CORS
-      let ok = false;
+      const res = await fetch(WEBAPP_URL, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
       try{
-        const res = await fetch(WEBAPP_URL, {
-          method: "POST",
-          mode: "cors",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          cache: "no-store",
-        });
-        try{
-          const data = await res.json();
-          ok = !!(data && (data.ok || data.success));
-        }catch(eJson){
-          ok = false;
-        }
-      }catch(e){
+        const data = await res.json();
+        ok = !!(data && (data.ok || data.success));
+      }catch(eJson){
         ok = false;
       }
-
-      if(ok){
-        alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.size}, babies: ${babies}, total: ${totalFinal})`);
-        return true;
-      }
-
-      // Fallback no-CORS
-      try{
-        await fetch(WEBAPP_URL, {
-          method:"POST",
-          mode:"no-cors",
-          body: JSON.stringify(payload)
-        });
-        alert(`Vuelo ${flight.number} enviado ✔️\nVerificá la hoja para confirmar la fila.`);
-        return true;
-      }catch(e2){
-        alert("No se pudo guardar en Sheet: " + e2.message);
-        return false;
-      }
-    }finally{
-      hideSavingOverlay();
+    }catch(e){
+      ok = false;
     }
+
+    if(ok){
+      alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.size}, babies: ${babies}, total: ${totalFinal})`);
+      return true;
+    }
+
+    // Fallback no-CORS
+    try{
+      await fetch(WEBAPP_URL, {
+        method:"POST",
+        mode:"no-cors",
+        body: JSON.stringify(payload)
+      });
+      alert(`Vuelo ${flight.number} enviado ✔️\nVerificá la hoja para confirmar la fila.`);
+      return true;
+    }catch(e2){
+      alert("No se pudo guardar en Sheet: " + e2.message);
+      return false;
+    }
+  }finally{
+    hideSavingOverlay();
   }
+}
+
 
   async function onCloseFlightSave(){
     if(!closingFlight){
