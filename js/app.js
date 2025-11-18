@@ -1,4 +1,4 @@
-// js/app.js (multi-vuelo, overlay verde y guardado por vuelo)
+// js/app.js (multi-vuelo + equipaje especial + overlay guardado)
 (function(){
   let reader;
   let streamTrack;
@@ -9,7 +9,7 @@
   let overlay, octx, video, rafId = null, detector = null;
 
   // Modelo de datos
-  // flights: [{id, number, dest, codes:Set, babies, totalFinal, closed, saved}]
+  // flights: [{id, number, dest, codes:[{code,specialType}], babies, totalFinal, closed, saved}]
   let flights = [];
   let currentFlightId = null;
   let lastFlightId = null;
@@ -117,7 +117,7 @@
 
       const count = document.createElement('div');
       count.className = 'flight-pill-count';
-      count.textContent = `Bolsas: ${f.codes.size}`;
+      count.textContent = `Bolsas: ${f.codes.length}`;
 
       const actions = document.createElement('div');
       actions.className = 'flight-pill-actions';
@@ -145,7 +145,6 @@
       pill.appendChild(actions);
 
       pill.addEventListener('click', (ev)=>{
-        // si clic en botones, no cambiar vuelo
         if(ev.target === btnView || ev.target === btnClose) return;
         setCurrentFlight(f.id);
       });
@@ -285,6 +284,14 @@
       $("#codeEdit").value = raw;
       updateFlightSelectInModal();
 
+      // reset equipaje especial UI
+      const chk = $("#specialCheck");
+      const wrap = $("#specialTypeWrap");
+      const sel  = $("#specialTypeSelect");
+      if(chk) chk.checked = false;
+      if(wrap) wrap.style.display = 'none';
+      if(sel) sel.value = "BABY";
+
       const isDup = allCodesGlobal.has(raw);
       $("#dupWarn").style.display = isDup ? 'block' : 'none';
       if(isDup){ try{ soundErr.currentTime = 0; soundErr.play(); }catch{} }
@@ -340,7 +347,7 @@
         id,
         number: num,
         dest,
-        codes: new Set(),
+        codes: [],           // ahora array de {code,specialType}
         babies: 0,
         totalFinal: 0,
         closed: false,
@@ -363,7 +370,6 @@
       return;
     }
 
-    // recordar maletero en localStorage
     try{ localStorage.setItem('scanner_porter', maletero); }catch(e){}
 
     currentFlightId = flights[0].id;
@@ -387,7 +393,7 @@
       return;
     }
     $("#badgeVuelo").textContent = `Vuelo ${f.number}` + (f.dest ? ` (${f.dest})` : '');
-    $("#badgeContador").textContent = `${f.codes.size} valijas`;
+    $("#badgeContador").textContent = `${f.codes.length} valijas`;
   }
 
   function renderResumen(){
@@ -419,22 +425,24 @@
         title.innerHTML = `<b>${f.number}</b>` + (f.dest ? ` (${f.dest})` : '');
         block.appendChild(title);
 
-        const info = document.createElement('div');
-        const bags = f.codes.size;
+        const bags = f.codes.length;
         const babies = f.babies || 0;
         const totalFinal = f.totalFinal || (bags + babies);
+
+        const info = document.createElement('div');
         info.innerHTML = `Bolsas: ${bags} &nbsp; | &nbsp; Babies: ${babies} &nbsp; | &nbsp; Total final: ${totalFinal}`;
         info.style.fontSize = '13px';
         info.style.marginBottom = '4px';
         block.appendChild(info);
 
-        if(f.codes.size){
+        if(f.codes.length){
           const ul = document.createElement('ul');
           ul.style.margin = '0';
           ul.style.paddingLeft = '18px';
-          Array.from(f.codes).forEach(code=>{
+          f.codes.forEach(c=>{
             const li = document.createElement('li');
-            li.textContent = code;
+            const label = c.specialType ? `${c.code} (${c.specialType})` : c.code;
+            li.textContent = label;
             ul.appendChild(li);
           });
           block.appendChild(ul);
@@ -501,9 +509,17 @@
       return;
     }
 
+    // Equipaje especial
+    const chk = $("#specialCheck");
+    const sel = $("#specialTypeSelect");
+    let specialType = null;
+    if(chk && chk.checked){
+      specialType = sel?.value || "OTRO";
+    }
+
     try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
     allCodesGlobal.add(edited);
-    flight.codes.add(edited);
+    flight.codes.push({ code: edited, specialType });
 
     currentFlightId = flight.id;
     lastFlightId = flight.id;
@@ -518,101 +534,107 @@
     hideConfirm();
   }
 
-  // ====== Gestor de códigos por vuelo ======
-function openCodesManagerForFlight(flightId){
-  const flight = getFlightById(flightId);
-  const cont = $("#codesList");
-  const titleEl = $("#codesModalTitle");
+  // ====== Gestor de códigos por vuelo (con lapiz + tipo) ======
+  function openCodesManagerForFlight(flightId){
+    const flight = getFlightById(flightId);
+    const cont = $("#codesList");
+    const titleEl = $("#codesModalTitle");
 
-  cont.innerHTML = "";
-  if(!flight){
-    titleEl.textContent = "Gestor de códigos";
-    const empty = document.createElement('div');
-    empty.className = 'muted';
-    empty.textContent = '(vuelo no encontrado)';
-    cont.appendChild(empty);
-    $("#codesModal").style.display = 'flex';
-    return;
-  }
+    cont.innerHTML = "";
+    if(!flight){
+      titleEl.textContent = "Gestor de códigos";
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = '(vuelo no encontrado)';
+      cont.appendChild(empty);
+      $("#codesModal").style.display = 'flex';
+      return;
+    }
 
-  titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
+    titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
 
-  if(flight.codes.size === 0){
-    const empty = document.createElement('div');
-    empty.className = 'muted';
-    empty.textContent = '(sin códigos)';
-    cont.appendChild(empty);
-  } else {
-    Array.from(flight.codes).forEach((code, idx)=>{
-      const row = document.createElement('div');
-      row.className = 'code-item';
+    if(flight.codes.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = '(sin códigos)';
+      cont.appendChild(empty);
+    } else {
+      flight.codes.forEach((item, idx)=>{
+        const { code, specialType } = item;
+        const label = specialType ? `${code} (${specialType})` : code;
 
-      const left = document.createElement('div');
-      left.innerHTML = `<span>${code}</span> <small>#${idx+1}</small>`;
+        const row = document.createElement('div');
+        row.className = 'code-item';
 
-      // Botón EDITAR (lapiz)
-      const edit = document.createElement('button');
-      edit.className = 'code-edit';
-      edit.textContent = '✏️';
-      edit.title = 'Editar código';
-      edit.addEventListener('click', ()=>{
-        const nuevo = prompt("Editar código escaneado:", code);
-        if(nuevo === null) return; // cancelado
-        const newTrim = (nuevo || "").trim();
-        if(!newTrim){
-          alert("El código no puede quedar vacío.");
-          return;
-        }
-        if(newTrim === code) return;
+        const left = document.createElement('div');
+        left.innerHTML = `<span>${label}</span> <small>#${idx+1}</small>`;
 
-        if(allCodesGlobal.has(newTrim)){
-          alert("Ya existe otro bag con ese código en esta sesión.");
-          if(navigator.vibrate) navigator.vibrate(200);
-          return;
-        }
+        // Editar código (manteniendo tipo especial)
+        const edit = document.createElement('button');
+        edit.className = 'code-edit';
+        edit.textContent = '✏️';
+        edit.title = 'Editar código';
+        edit.addEventListener('click', ()=>{
+          const nuevo = prompt("Editar código escaneado:", code);
+          if(nuevo === null) return;
+          const newTrim = (nuevo || "").trim();
+          if(!newTrim){
+            alert("El código no puede quedar vacío.");
+            return;
+          }
+          if(newTrim === code) return;
 
-        // Actualizar sets
-        flight.codes.delete(code);
-        allCodesGlobal.delete(code);
-        flight.codes.add(newTrim);
-        allCodesGlobal.add(newTrim);
+          if(allCodesGlobal.has(newTrim)){
+            alert("Ya existe otro bag con ese código en esta sesión.");
+            if(navigator.vibrate) navigator.vibrate(200);
+            return;
+          }
 
-        try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+          // Actualizar sets y array
+          allCodesGlobal.delete(code);
+          allCodesGlobal.add(newTrim);
+          item.code = newTrim;
 
-        if(currentFlightId === flight.id){
+          try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+
+          if(currentFlightId === flight.id){
+            actualizarContador();
+          }
+          renderFlightsPanel();
+          openCodesManagerForFlight(flight.id);
+        });
+
+        // Eliminar código
+        const del = document.createElement('button');
+        del.className = 'code-del';
+        del.textContent = '🗑️';
+        del.title = 'Eliminar código';
+        del.addEventListener('click', ()=>{
+          const c1 = confirm(`¿Eliminar el código ${label}?`);
+          if(!c1) return;
+          const c2 = confirm(`Confirmar eliminación definitiva de ${label}?`);
+          if(!c2) return;
+
+          const idxToRemove = flight.codes.indexOf(item);
+          if(idxToRemove >= 0){
+            flight.codes.splice(idxToRemove,1);
+          }
+          allCodesGlobal.delete(code);
+
           actualizarContador();
-        }
-        renderFlightsPanel();
-        openCodesManagerForFlight(flight.id); // refrescar lista
+          renderFlightsPanel();
+          openCodesManagerForFlight(flight.id);
+        });
+
+        row.appendChild(left);
+        row.appendChild(edit);
+        row.appendChild(del);
+        cont.appendChild(row);
       });
+    }
 
-      // Botón ELIMINAR (tacho)
-      const del = document.createElement('button');
-      del.className = 'code-del';
-      del.textContent = '🗑️';
-      del.title = 'Eliminar código';
-      del.addEventListener('click', ()=>{
-        const c1 = confirm(`¿Eliminar el código ${code}?`);
-        if(!c1) return;
-        const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
-        if(!c2) return;
-
-        flight.codes.delete(code);
-        allCodesGlobal.delete(code);
-        actualizarContador();
-        renderFlightsPanel();
-        openCodesManagerForFlight(flight.id); // refrescar lista
-      });
-
-      row.appendChild(left);
-      row.appendChild(edit);
-      row.appendChild(del);
-      cont.appendChild(row);
-    });
+    $("#codesModal").style.display = 'flex';
   }
-
-  $("#codesModal").style.display = 'flex';
-}
 
   function openCodesManager(){
     const base = currentFlightId || (flights.find(f=>!f.closed)?.id);
@@ -633,7 +655,7 @@ function openCodesManagerForFlight(flightId){
       alert("Vuelo no encontrado.");
       return;
     }
-    if(flight.codes.size === 0){
+    if(flight.codes.length === 0){
       const ok = confirm("Este vuelo no tiene códigos. ¿Cerrar igual?");
       if(!ok) return;
     }
@@ -643,97 +665,99 @@ function openCodesManagerForFlight(flightId){
     $("#closeFlightTitle").textContent =
       `Cerrar vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
     $("#closeFlightInfo").textContent =
-      `El vuelo tiene ${flight.codes.size} valijas despachadas. Podés sumar babies si corresponde.`;
+      `El vuelo tiene ${flight.codes.length} valijas despachadas. Podés sumar babies si corresponde.`;
 
-    $("#closeFlightBags").textContent = String(flight.codes.size);
+    $("#closeFlightBags").textContent = String(flight.codes.length);
     $("#closeFlightBaby").value = "0";
-    $("#closeFlightTotalFinal").textContent = String(flight.codes.size);
+    $("#closeFlightTotalFinal").textContent = String(flight.codes.length);
 
     $("#closeFlightModal").style.display = 'flex';
   }
 
   function updateCloseFlightTotal(){
     if(!closingFlight) return;
-    const bags = closingFlight.codes.size;
+    const bags = closingFlight.codes.length;
     const babies = parseInt($("#closeFlightBaby").value, 10) || 0;
     const total = bags + babies;
     $("#closeFlightTotalFinal").textContent = String(total);
   }
 
-async function guardarVueloEnSheet(flight, babies, totalFinal){
-  if(!WEBAPP_URL){
-    alert("No hay WebApp configurada (editá js/config.js)");
-    return false;
-  }
-
-  const payload = {
-    day: $("#dia").value.trim(),
-    porter: $("#maletero").value.trim(),
-    flight: flight.number,
-    destination: flight.dest,
-
-    // 👇 Campo viejo que usa tu Apps Script para la columna D
-    total: flight.codes.size,
-
-    // 👇 Campos nuevos (por si los querés usar en la hoja)
-    totalBags: flight.codes.size,
-    baby: babies,
-    totalFinal: totalFinal,
-    codes: Array.from(flight.codes)
-  };
-
-  showSavingOverlay();
-  try{
-    // Intento CORS
-    let ok = false;
-    try{
-      const res = await fetch(WEBAPP_URL, {
-        method: "POST",
-        mode: "cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        cache: "no-store",
-      });
-      try{
-        const data = await res.json();
-        ok = !!(data && (data.ok || data.success));
-      }catch(eJson){
-        ok = false;
-      }
-    }catch(e){
-      ok = false;
-    }
-
-    if(ok){
-      alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.size}, babies: ${babies}, total: ${totalFinal})`);
-      return true;
-    }
-
-    // Fallback no-CORS
-    try{
-      await fetch(WEBAPP_URL, {
-        method:"POST",
-        mode:"no-cors",
-        body: JSON.stringify(payload)
-      });
-      alert(`Vuelo ${flight.number} enviado ✔️\nVerificá la hoja para confirmar la fila.`);
-      return true;
-    }catch(e2){
-      alert("No se pudo guardar en Sheet: " + e2.message);
+  async function guardarVueloEnSheet(flight, babies, totalFinal){
+    if(!WEBAPP_URL){
+      alert("No hay WebApp configurada (editá js/config.js)");
       return false;
     }
-  }finally{
-    hideSavingOverlay();
-  }
-}
 
+    // Armamos códigos decorados para Google Sheet
+    const codesDecorados = flight.codes.map(c =>
+      c.specialType ? `${c.code} (${c.specialType})` : c.code
+    );
+
+    const payload = {
+      day: $("#dia").value.trim(),
+      porter: $("#maletero").value.trim(),
+      flight: flight.number,
+      destination: flight.dest,
+
+      // campo viejo que usás para columna de total
+      total: flight.codes.length,
+
+      // campos nuevos
+      totalBags: flight.codes.length,
+      baby: babies,
+      totalFinal: totalFinal,
+      codes: codesDecorados
+    };
+
+    showSavingOverlay();
+    try{
+      let ok = false;
+      try{
+        const res = await fetch(WEBAPP_URL, {
+          method: "POST",
+          mode: "cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        });
+        try{
+          const data = await res.json();
+          ok = !!(data && (data.ok || data.success));
+        }catch(eJson){
+          ok = false;
+        }
+      }catch(e){
+        ok = false;
+      }
+
+      if(ok){
+        alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.length}, babies: ${babies}, total: ${totalFinal})`);
+        return true;
+      }
+
+      try{
+        await fetch(WEBAPP_URL, {
+          method:"POST",
+          mode:"no-cors",
+          body: JSON.stringify(payload)
+        });
+        alert(`Vuelo ${flight.number} enviado ✔️\nVerificá la hoja para confirmar la fila.`);
+        return true;
+      }catch(e2){
+        alert("No se pudo guardar en Sheet: " + e2.message);
+        return false;
+      }
+    }finally{
+      hideSavingOverlay();
+    }
+  }
 
   async function onCloseFlightSave(){
     if(!closingFlight){
       $("#closeFlightModal").style.display = 'none';
       return;
     }
-    const bags = closingFlight.codes.size;
+    const bags = closingFlight.codes.length;
     const babies = parseInt($("#closeFlightBaby").value, 10) || 0;
     const totalFinal = bags + babies;
 
@@ -778,11 +802,11 @@ async function guardarVueloEnSheet(flight, babies, totalFinal){
 
     const inputNum = document.createElement('input');
     inputNum.className = 'flight-num';
-    inputNum.placeholder = '5240';
+    inputNum.placeholder = 'FO501';
 
     const inputDest = document.createElement('input');
     inputDest.className = 'flight-dest';
-    inputDest.placeholder = 'BRC';
+    inputDest.placeholder = 'Destino';
 
     const btnDel = document.createElement('button');
     btnDel.type = 'button';
@@ -815,7 +839,6 @@ async function guardarVueloEnSheet(flight, babies, totalFinal){
   document.addEventListener('DOMContentLoaded', async ()=>{
     initDateAndPorter();
 
-    // al menos una fila de vuelo
     addFlightRow();
 
     $("#btnAddFlightRow").addEventListener('click', addFlightRow);
@@ -839,6 +862,15 @@ async function guardarVueloEnSheet(flight, babies, totalFinal){
     $("#closeFlightBaby").addEventListener('input', updateCloseFlightTotal);
     $("#btnCloseFlightSave").addEventListener('click', onCloseFlightSave);
     $("#btnCloseFlightCancel").addEventListener('click', onCloseFlightCancel);
+
+    // Mostrar/esconder combo de equipaje especial
+    const specialCheck = $("#specialCheck");
+    const specialWrap  = $("#specialTypeWrap");
+    if(specialCheck && specialWrap){
+      specialCheck.addEventListener('change', ()=>{
+        specialWrap.style.display = specialCheck.checked ? 'block' : 'none';
+      });
+    }
 
     // Botón "Guardar en Google Sheet" del resumen ahora solo informa
     $("#btnSave").addEventListener('click', ()=>{

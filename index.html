@@ -102,15 +102,35 @@
       <div class="muted" style="margin-bottom:4px;">
         Podés corregirlo manualmente si el lector falló.
       </div>
+
       <input id="codeEdit" class="code-input" autocomplete="off" />
+
       <div style="margin-top:8px;">
         <label>Vuelo para este bag</label>
         <select id="codeFlightSelect"></select>
       </div>
+
+      <!-- Equipaje especial -->
+      <div class="special-row">
+        <input type="checkbox" id="specialCheck">
+        <label for="specialCheck">Equipaje especial</label>
+      </div>
+      <div id="specialTypeWrap" style="display:none; margin-top:6px;">
+        <label>Tipo de equipaje</label>
+        <select id="specialTypeSelect">
+          <option value="BABY">BABY</option>
+          <option value="WEAP">WEAP</option>
+          <option value="DEPORTIVO">DEPORTIVO</option>
+          <option value="SILLA DE RUEDA">SILLA DE RUEDA</option>
+          <option value="OTRO">OTRO</option>
+        </select>
+      </div>
+
       <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado (en toda la sesión)</div>
-      <div class="confirm-btns" style="justify-content:flex-end;">
+
+      <div class="confirm-btns">
         <button id="btnRetry" class="warn">Reintentar</button>
-        <button id="btnAccept">Guardar</button>
+        <button id="btnAccept" class="okbtn">Guardar</button>
       </div>
     </div>
   </div>

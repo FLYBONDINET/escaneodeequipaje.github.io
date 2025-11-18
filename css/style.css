@@ -222,3 +222,18 @@ button:hover{filter:brightness(1.05);}
   color:#fff;
   font-weight:600;
 }
+/* Equipaje especial en modal */
+.special-row{
+  margin-top:8px;
+  font-size:13px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+#specialTypeWrap select{
+  width:100%;
+  padding:6px;
+  border-radius:8px;
+  border:1px solid #ccc;
+}
