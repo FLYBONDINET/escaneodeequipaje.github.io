@@ -1,4 +1,4 @@
-// js/app.js (multi-vuelo + equipaje especial + overlay guardado)
+// js/app.js (multi-vuelo + equipaje especial + autosave local + overlay guardado)
 (function(){
   let reader;
   let streamTrack;
@@ -25,6 +25,8 @@
   // Sonidos
   const soundOk  = new Audio('sounds/beep_ok.wav');
   const soundErr = new Audio('sounds/beep_err.wav');
+
+  const LOCAL_STATE_KEY = 'fb_scanner_state_v2';
 
   const $ = sel => document.querySelector(sel);
 
@@ -56,6 +58,99 @@
     setInputsDisabled(false);
   }
 
+  // ====== Estado local (autosave) ======
+  function rebuildAllCodesGlobal(){
+    allCodesGlobal = new Set();
+    flights.forEach(f=>{
+      (f.codes || []).forEach(c=>{
+        if(c && c.code != null){
+          allCodesGlobal.add(String(c.code));
+        }
+      });
+    });
+  }
+
+  function saveStateToLocal(){
+    const state = {
+      day: $("#dia")?.value || "",
+      porter: $("#maletero")?.value || "",
+      flights,
+      currentFlightId,
+      lastFlightId
+    };
+    try{
+      localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(state));
+    }catch(e){
+      // si falla (modo incógnito, etc.) no pasa nada
+    }
+  }
+
+  function clearLocalState(){
+    try{
+      localStorage.removeItem(LOCAL_STATE_KEY);
+    }catch(e){}
+  }
+
+  async function tryRestoreState(){
+    let raw;
+    try{
+      raw = localStorage.getItem(LOCAL_STATE_KEY);
+    }catch(e){
+      return;
+    }
+    if(!raw) return;
+
+    let state;
+    try{
+      state = JSON.parse(raw);
+    }catch(e){
+      return;
+    }
+
+    if(!state || !Array.isArray(state.flights) || !state.flights.length) return;
+
+    const ok = confirm("Hay un escaneo anterior sin finalizar. ¿Querés recuperarlo?");
+    if(!ok){
+      clearLocalState();
+      return;
+    }
+
+    // Restaurar campos básicos
+    if($("#dia")) $("#dia").value = state.day || new Date().toISOString().slice(0,10);
+    if($("#maletero")) $("#maletero").value = state.porter || "";
+
+    // Restaurar vuelos
+    flights = state.flights.map(f=>({
+      id: f.id,
+      number: f.number,
+      dest: f.dest || "",
+      codes: Array.isArray(f.codes)
+        ? f.codes.map(c=>({ code: String(c.code), specialType: c.specialType || null }))
+        : [],
+      babies: f.babies || 0,
+      totalFinal: f.totalFinal || 0,
+      closed: !!f.closed,
+      saved: !!f.saved
+    }));
+
+    currentFlightId = state.currentFlightId || (flights.find(fl=>!fl.closed)?.id || (flights[0] && flights[0].id));
+    lastFlightId = state.lastFlightId || currentFlightId;
+
+    rebuildAllCodesGlobal();
+
+    // Mostrar directamente el scanner
+    $("#form").style.display = "none";
+    $("#scanner").style.display = "block";
+
+    renderFlightsPanel();
+    actualizarContador();
+
+    // Volver a iniciar cámara / overlay
+    try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
+    await listarCamaras();
+    await restartScan();
+  }
+
   // ====== Utilidad vuelos ======
   function getFlightById(id){
     return flights.find(f => f.id === id) || null;
@@ -67,6 +162,7 @@
     currentFlightId = id;
     lastFlightId = id;
     actualizarContador();
+    saveStateToLocal();
   }
 
   function updateFlightSelectInModal(){
@@ -347,7 +443,7 @@
         id,
         number: num,
         dest,
-        codes: [],           // ahora array de {code,specialType}
+        codes: [],           // array de {code,specialType}
         babies: 0,
         totalFinal: 0,
         closed: false,
@@ -383,6 +479,8 @@
     actualizarContador();
     await restartScan();
     await listarCamaras();
+
+    saveStateToLocal();
   }
 
   function actualizarContador(){
@@ -440,8 +538,8 @@
           ul.style.margin = '0';
           ul.style.paddingLeft = '18px';
           f.codes.forEach(c=>{
-            const li = document.createElement('li');
             const label = c.specialType ? `${c.code} (${c.specialType})` : c.code;
+            const li = document.createElement('li');
             li.textContent = label;
             ul.appendChild(li);
           });
@@ -457,6 +555,7 @@
   }
 
   function finalizar(){
+    clearLocalState();
     $("#scanner").style.display = "none";
     $("#resumen").style.display = "block";
     renderResumen();
@@ -466,6 +565,7 @@
   }
 
   function cancelar(){
+    clearLocalState();
     if(reader){ try{ reader.reset(); }catch{} }
     if(rafId) cancelAnimationFrame(rafId);
     location.reload();
@@ -527,6 +627,7 @@
     actualizarContador();
     renderFlightsPanel();
     hideConfirm();
+    saveStateToLocal();
   }
 
   function retryCode(){
@@ -590,7 +691,6 @@
             return;
           }
 
-          // Actualizar sets y array
           allCodesGlobal.delete(code);
           allCodesGlobal.add(newTrim);
           item.code = newTrim;
@@ -602,6 +702,7 @@
           }
           renderFlightsPanel();
           openCodesManagerForFlight(flight.id);
+          saveStateToLocal();
         });
 
         // Eliminar código
@@ -624,6 +725,7 @@
           actualizarContador();
           renderFlightsPanel();
           openCodesManagerForFlight(flight.id);
+          saveStateToLocal();
         });
 
         row.appendChild(left);
@@ -688,7 +790,6 @@
       return false;
     }
 
-    // Armamos códigos decorados para Google Sheet
     const codesDecorados = flight.codes.map(c =>
       c.specialType ? `${c.code} (${c.specialType})` : c.code
     );
@@ -698,11 +799,7 @@
       porter: $("#maletero").value.trim(),
       flight: flight.number,
       destination: flight.dest,
-
-      // campo viejo que usás para columna de total
       total: flight.codes.length,
-
-      // campos nuevos
       totalBags: flight.codes.length,
       baby: babies,
       totalFinal: totalFinal,
@@ -772,6 +869,7 @@
       closingFlight = null;
 
       renderFlightsPanel();
+      saveStateToLocal();
 
       const remaining = flights.filter(f=>!f.closed);
       if(remaining.length){
@@ -846,7 +944,10 @@
     $("#btnFinish").addEventListener('click', finalizar);
     $("#btnCancel").addEventListener('click', cancelar);
     $("#btnTorch").addEventListener('click', toggleTorch);
-    $("#btnNew").addEventListener('click', ()=>location.reload());
+    $("#btnNew").addEventListener('click', ()=>{
+      clearLocalState();
+      location.reload();
+    });
 
     $("#btnAccept").addEventListener('click', acceptCode);
     $("#btnRetry").addEventListener('click', retryCode);
@@ -863,7 +964,6 @@
     $("#btnCloseFlightSave").addEventListener('click', onCloseFlightSave);
     $("#btnCloseFlightCancel").addEventListener('click', onCloseFlightCancel);
 
-    // Mostrar/esconder combo de equipaje especial
     const specialCheck = $("#specialCheck");
     const specialWrap  = $("#specialTypeWrap");
     if(specialCheck && specialWrap){
@@ -872,12 +972,17 @@
       });
     }
 
-    // Botón "Guardar en Google Sheet" del resumen ahora solo informa
     $("#btnSave").addEventListener('click', ()=>{
       alert("El guardado se realiza cuando cerrás cada vuelo con el tilde verde. El resumen es solo informativo.");
     });
 
-    try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
-    await listarCamaras();
+    // Intentar restaurar sesión anterior
+    await tryRestoreState();
+
+    // Si no se restauró nada, pre-pedir permiso de cámara y listar cámaras
+    if($("#form").style.display !== "none"){
+      try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
+      await listarCamaras();
+    }
   });
 })();
