@@ -237,3 +237,20 @@ button:hover{filter:brightness(1.05);}
   border-radius:8px;
   border:1px solid #ccc;
 }
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--fb-yellow);
+  color: var(--fb-black);
+  padding: 14px 18px;
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.header-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px; /* si querés que sea redondeado */
+}
