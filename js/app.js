@@ -900,11 +900,11 @@
 
     const inputNum = document.createElement('input');
     inputNum.className = 'flight-num';
-    inputNum.placeholder = 'FO501';
+    inputNum.placeholder = '5000';
 
     const inputDest = document.createElement('input');
     inputDest.className = 'flight-dest';
-    inputDest.placeholder = 'Destino';
+    inputDest.placeholder = 'COR';
 
     const btnDel = document.createElement('button');
     btnDel.type = 'button';
