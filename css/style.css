@@ -201,3 +201,56 @@ button:hover{filter:brightness(1.05);}
 @keyframes spin{
   to{transform:rotate(360deg);}
 }
+/* Modal confirmación: botones centrados y en columna */
+.confirm-btns{
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  margin-top:15px;
+  gap:10px;
+}
+
+.confirm-btns button{
+  width:150px;
+  text-align:center;
+}
+
+/* Botón guardar */
+.okbtn{
+  background:#28a745;
+  color:#fff;
+  font-weight:600;
+}
+/* Equipaje especial en modal */
+.special-row{
+  margin-top:8px;
+  font-size:13px;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+#specialTypeWrap select{
+  width:100%;
+  padding:6px;
+  border-radius:8px;
+  border:1px solid #ccc;
+}
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--fb-yellow);
+  color: var(--fb-black);
+  padding: 14px 18px;
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.header-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px; /* si querés que sea redondeado */
+}

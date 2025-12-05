@@ -4,10 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Flybondi Baggage Scanner</title>
+
+  <!-- PWA -->
+  <meta name="theme-color" content="#FFD400">
+  <link rel="manifest" href="manifest.json">
+
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <header>Flybondi Baggage Scanner</header>
+<header class="app-header">
+  <img src="icons/icon-192.png" class="header-icon" alt="logo">
+  Flybondi Baggage Scanner
+</header>
 
   <div class="wrap">
     <!-- Formulario inicial -->
@@ -34,16 +42,12 @@
         </div>
       </div>
 
-      <div class="row" style="margin-top:10px;">
-        <div>
-          <label>Elegir cámara</label>
-          <select id="cameraSelect">
-            <option value="">(permití la cámara primero)</option>
-          </select>
-        </div>
+      <div class="muted" style="margin-top:10px;">
+        Conectá el lector de código de barras (USB o Bluetooth en modo teclado).
+        Cuando inicies el escaneo, cada lectura abrirá la ventana de confirmación.
       </div>
-      <button id="btnStart">Iniciar escaneo</button>
-      <div class="muted">Consejo: tocá el video para forzar el autofocus en algunos móviles.</div>
+
+      <button id="btnStart" style="margin-top:10px;">Iniciar escaneo</button>
     </div>
 
     <!-- Escaneo -->
@@ -53,28 +57,18 @@
         <div><span class="pill" id="badgeContador">0 valijas</span></div>
       </div>
 
-      <div class="video-wrap">
-        <video id="preview" playsinline muted></video>
-        <canvas id="overlay"></canvas>
-      </div>
-
-      <div class="row" style="margin-top:8px;">
-        <div>
-          <label>Cambiar cámara (durante escaneo)</label>
-          <select id="cameraSelectLive">
-            <option value="">(seleccioná una cámara)</option>
-          </select>
-        </div>
+      <div class="muted" style="margin:10px 0;">
+        Escaneá las etiquetas con el lector conectado.  
+        Cada lectura abrirá el cuadro de <b>Confirmar / editar código</b>.
       </div>
 
       <!-- Panel de vuelos y conteos -->
       <div class="flights-panel-title">
-        Vuelos y bolsas
+        Vuelos Activos
       </div>
       <div class="flights-panel" id="flightsPanel"></div>
 
       <div class="right">
-        <button id="btnTorch" class="warn" disabled>Linterna</button>
         <button id="btnManageCodes">Gestionar códigos vuelo actual</button>
         <button id="btnFinish">Finalizar escaneo</button>
         <button id="btnCancel" class="warn">Cancelar</button>
@@ -90,7 +84,7 @@
         <button id="btnNew">Nuevo escaneo</button>
       </div>
       <div class="muted">
-        Ahora el guardado se realiza vuelo por vuelo desde el panel lateral (tilde verde).
+        El guardado se realiza vuelo por vuelo desde el panel lateral (tilde verde).
       </div>
     </div>
   </div>
@@ -102,15 +96,37 @@
       <div class="muted" style="margin-bottom:4px;">
         Podés corregirlo manualmente si el lector falló.
       </div>
+
       <input id="codeEdit" class="code-input" autocomplete="off" />
+
       <div style="margin-top:8px;">
         <label>Vuelo para este bag</label>
         <select id="codeFlightSelect"></select>
       </div>
-      <div id="dupWarn" class="dupwarn" style="display:none;">⚠️ Código duplicado (en toda la sesión)</div>
-      <div class="right" style="justify-content:flex-end;">
+
+      <!-- Equipaje especial -->
+      <div class="special-row">
+        <input type="checkbox" id="specialCheck">
+        <label for="specialCheck">Equipaje especial</label>
+      </div>
+      <div id="specialTypeWrap" style="display:none; margin-top:6px;">
+        <label>Tipo de equipaje</label>
+        <select id="specialTypeSelect">
+          <option value="BABY">BABY</option>
+          <option value="WEAP">WEAP</option>
+          <option value="DEPORTIVO">DEPORTIVO</option>
+          <option value="SILLA DE RUEDA">SILLA DE RUEDA</option>
+          <option value="OTRO">OTRO</option>
+        </select>
+      </div>
+
+      <div id="dupWarn" class="dupwarn" style="display:none;">
+        ⚠️ Código duplicado (en toda la sesión)
+      </div>
+
+      <div class="confirm-btns">
         <button id="btnRetry" class="warn">Reintentar</button>
-        <button id="btnAccept">Guardar</button>
+        <button id="btnAccept" class="okbtn">Guardar</button>
       </div>
     </div>
   </div>
@@ -166,9 +182,20 @@
     </div>
   </div>
 
-  <!-- Librerías y scripts -->
-  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+  <!-- Scripts -->
   <script src="js/config.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- Registro del Service Worker (PWA) -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('service-worker.js')
+          .catch(function(err){
+            console.log('Service Worker registration failed:', err);
+          });
+      });
+    }
+  </script>
 </body>
 </html>

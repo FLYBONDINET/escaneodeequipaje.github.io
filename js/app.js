@@ -1,15 +1,17 @@
-// js/app.js (multi-vuelo, overlay verde y guardado por vuelo)
+// js/app.js (multi-vuelo + equipaje especial + autosave local + USB scanner)
+// -------------------------------------------------------------------------
+// Versión SIN cámara: usa lector de código de barras que actúa como teclado.
+// -------------------------------------------------------------------------
 (function(){
-  let reader;
-  let streamTrack;
-  let torchOn = false;
-  let deviceId = null;
+  // --- Estado / variables base ---
+  let reader;        // legacy (no se usa en modo USB)
+  let deviceId = null; // legacy, por si en el futuro volves a cámara
 
-  // overlay scanner
+  // overlay scanner (legacy, no-op)
   let overlay, octx, video, rafId = null, detector = null;
 
   // Modelo de datos
-  // flights: [{id, number, dest, codes:Set, babies, totalFinal, closed, saved}]
+  // flights: [{id, number, dest, codes:[{code,specialType}], babies, totalFinal, closed, saved}]
   let flights = [];
   let currentFlightId = null;
   let lastFlightId = null;
@@ -26,9 +28,13 @@
   const soundOk  = new Audio('sounds/beep_ok.wav');
   const soundErr = new Audio('sounds/beep_err.wav');
 
+  const LOCAL_STATE_KEY = 'fb_scanner_state_v2';
+
   const $ = sel => document.querySelector(sel);
 
-  // ====== Helpers bloqueo global ======
+  // -----------------------------------------------------------------------
+  // Helpers bloqueo global
+  // -----------------------------------------------------------------------
   function setInputsDisabled(disabled){
     const elems = document.querySelectorAll('button, input, select, textarea');
     elems.forEach(el=>{
@@ -56,7 +62,102 @@
     setInputsDisabled(false);
   }
 
-  // ====== Utilidad vuelos ======
+  // -----------------------------------------------------------------------
+  // Estado local (autosave)
+  // -----------------------------------------------------------------------
+  function rebuildAllCodesGlobal(){
+    allCodesGlobal = new Set();
+    flights.forEach(f=>{
+      (f.codes || []).forEach(c=>{
+        if(c && c.code != null){
+          allCodesGlobal.add(String(c.code));
+        }
+      });
+    });
+  }
+
+  function saveStateToLocal(){
+    const state = {
+      day: $("#dia")?.value || "",
+      porter: $("#maletero")?.value || "",
+      flights,
+      currentFlightId,
+      lastFlightId
+    };
+    try{
+      localStorage.setItem(LOCAL_STATE_KEY, JSON.stringify(state));
+    }catch(e){
+      // modo incógnito, etc.
+    }
+  }
+
+  function clearLocalState(){
+    try{
+      localStorage.removeItem(LOCAL_STATE_KEY);
+    }catch(e){}
+  }
+
+  async function tryRestoreState(){
+    let raw;
+    try{
+      raw = localStorage.getItem(LOCAL_STATE_KEY);
+    }catch(e){
+      return;
+    }
+    if(!raw) return;
+
+    let state;
+    try{
+      state = JSON.parse(raw);
+    }catch(e){
+      return;
+    }
+
+    if(!state || !Array.isArray(state.flights) || !state.flights.length) return;
+
+    const ok = confirm("Hay un escaneo anterior sin finalizar. ¿Querés recuperarlo?");
+    if(!ok){
+      clearLocalState();
+      return;
+    }
+
+    // Restaurar campos básicos
+    if($("#dia")) $("#dia").value = state.day || new Date().toISOString().slice(0,10);
+    if($("#maletero")) $("#maletero").value = state.porter || "";
+
+    // Restaurar vuelos
+    flights = state.flights.map(f=>({
+      id: f.id,
+      number: f.number,
+      dest: f.dest || "",
+      codes: Array.isArray(f.codes)
+        ? f.codes.map(c=>({ code: String(c.code), specialType: c.specialType || null }))
+        : [],
+      babies: f.babies || 0,
+      totalFinal: f.totalFinal || 0,
+      closed: !!f.closed,
+      saved: !!f.saved
+    }));
+
+    currentFlightId = state.currentFlightId || (flights.find(fl=>!fl.closed)?.id || (flights[0] && flights[0].id));
+    lastFlightId = state.lastFlightId || currentFlightId;
+
+    rebuildAllCodesGlobal();
+
+    // Mostrar directamente el scanner (UI)
+    if($("#form")) $("#form").style.display = "none";
+    if($("#scanner")) $("#scanner").style.display = "block";
+
+    renderFlightsPanel();
+    actualizarContador();
+
+    // En modo USB: dejar el input listo SOLO porque ya estamos en scanner
+    focusBarcodeInput();
+  }
+
+  // -----------------------------------------------------------------------
+  // Utilidad vuelos
+  // -----------------------------------------------------------------------
   function getFlightById(id){
     return flights.find(f => f.id === id) || null;
   }
@@ -67,6 +168,7 @@
     currentFlightId = id;
     lastFlightId = id;
     actualizarContador();
+    saveStateToLocal();
   }
 
   function updateFlightSelectInModal(){
@@ -117,14 +219,15 @@
 
       const count = document.createElement('div');
       count.className = 'flight-pill-count';
-      count.textContent = `Bolsas: ${f.codes.size}`;
+      count.textContent = `Bolsas: ${f.codes.length}`;
 
       const actions = document.createElement('div');
       actions.className = 'flight-pill-actions';
       const btnView = document.createElement('button');
       btnView.className = 'flight-view-btn';
       btnView.textContent = 'Ver códigos';
-      btnView.addEventListener('click', ()=>{
+      btnView.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
         managerFlightId = f.id;
         openCodesManagerForFlight(f.id);
       });
@@ -133,7 +236,8 @@
       btnClose.className = 'flight-close-btn';
       btnClose.textContent = '✔';
       btnClose.title = 'Cerrar vuelo';
-      btnClose.addEventListener('click', ()=>{
+      btnClose.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
         openCloseFlightModal(f.id);
       });
 
@@ -145,7 +249,6 @@
       pill.appendChild(actions);
 
       pill.addEventListener('click', (ev)=>{
-        // si clic en botones, no cambiar vuelo
         if(ev.target === btnView || ev.target === btnClose) return;
         setCurrentFlight(f.id);
       });
@@ -154,175 +257,19 @@
     });
   }
 
-  // ====== Cámara ======
-  async function getVideoInputsFallback(){
-    if(navigator.mediaDevices?.enumerateDevices){
-      const devs = await navigator.mediaDevices.enumerateDevices();
-      return devs.filter(d => d.kind === 'videoinput').map(d => ({ deviceId: d.deviceId, label: d.label }));
-    }
-    return [];
-  }
+  // -----------------------------------------------------------------------
+  // Legacy cámara => ahora no-op para evitar errores si algo los llama
+  // -----------------------------------------------------------------------
+  async function getVideoInputsFallback(){ return []; }
+  async function listarCamaras(){ /* no-op en modo USB */ }
+  function sizeOverlayToVideo(){ /* no-op */ }
+  function drawBoxes(){ /* no-op */ }
+  async function loopDetector(){ /* no-op */ }
+  async function restartScan(){ /* no-op */ }
 
-  async function listarCamaras() {
-    try{
-      let devs = [];
-      if (ZXing.BrowserCodeReader?.listVideoInputDevices) {
-        devs = await ZXing.BrowserCodeReader.listVideoInputDevices();
-      } else {
-        devs = await getVideoInputsFallback();
-      }
-
-      const selInit = $("#cameraSelect");
-      if (selInit) {
-        selInit.innerHTML = "";
-        devs.forEach(d => {
-          const opt = document.createElement('option');
-          opt.value = d.deviceId;
-          opt.textContent = d.label || `Cam ${d.deviceId.substring(0,6)}...`;
-          selInit.appendChild(opt);
-        });
-        const env = devs.find(d => /back|rear|environment/i.test(d.label||''));
-        selInit.value = env?.deviceId || (devs[0]?.deviceId || "");
-      }
-
-      const selLive = $("#cameraSelectLive");
-      if (selLive) {
-        selLive.innerHTML = "";
-        devs.forEach(d => {
-          const opt = document.createElement('option');
-          opt.value = d.deviceId;
-          opt.textContent = d.label || `Cam ${d.deviceId.substring(0,6)}...`;
-          selLive.appendChild(opt);
-        });
-        selLive.value = deviceId || (devs.find(d => /back|rear|environment/i.test(d.label||''))?.deviceId) || (devs[0]?.deviceId || "");
-      }
-    }catch(e){
-      alert("No pude listar cámaras: " + e.message);
-    }
-  }
-
-  // ====== Overlay scanner ======
-  function sizeOverlayToVideo(){
-    if(!overlay || !video) return;
-    const rect = video.getBoundingClientRect();
-    overlay.width  = rect.width  * devicePixelRatio;
-    overlay.height = rect.height * devicePixelRatio;
-    overlay.style.width  = rect.width + 'px';
-    overlay.style.height = rect.height + 'px';
-    octx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-    octx.clearRect(0,0,overlay.width,overlay.height);
-  }
-
-  function drawBoxes(detections){
-    octx.clearRect(0,0,overlay.width,overlay.height);
-    if(!detections || detections.length === 0) return;
-    octx.lineWidth = 6;
-    octx.strokeStyle = '#00c853';
-    octx.shadowBlur = 12;
-    octx.shadowColor = '#00c853';
-    detections.forEach(d=>{
-      const r = d.boundingBox;
-      octx.beginPath();
-      octx.rect(r.x, r.y, r.width, r.height);
-      octx.stroke();
-    });
-    octx.shadowBlur = 0;
-  }
-
-  async function loopDetector(){
-    cancelAnimationFrame(rafId);
-    if(!detector || !video) return;
-    const tick = async () => {
-      try{
-        const dets = await detector.detect(video);
-        drawBoxes(dets);
-      }catch{
-        octx && octx.clearRect(0,0,overlay.width,overlay.height);
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-  }
-
-  // ====== ZXing ======
-  async function restartScan(){
-    if(reader){ try{ reader.reset(); }catch{} }
-    reader = new ZXing.BrowserMultiFormatReader();
-    video = $("#preview");
-    overlay = $("#overlay");
-    octx = overlay.getContext('2d');
-
-    sizeOverlayToVideo();
-    new ResizeObserver(sizeOverlayToVideo).observe(video);
-
-    if ('BarcodeDetector' in window) {
-      try{
-        detector = new BarcodeDetector({
-          formats: [
-            'qr_code','pdf417','aztec','data_matrix',
-            'code_128','code_39','code_93','codabar',
-            'ean_13','ean_8','itf','upc_a','upc_e'
-          ]
-        });
-        loopDetector();
-      }catch{ detector = null; }
-    } else {
-      detector = null;
-      octx.clearRect(0,0,overlay.width,overlay.height);
-    }
-
-    await reader.decodeFromVideoDevice(deviceId, video, (result)=>{
-      if(!result || confirming) return;
-      const raw = String(result.text || "").trim();
-      if(!raw) return;
-
-      if(!detector){
-        $("#preview").classList.add('video-glow');
-        setTimeout(()=> $("#preview").classList.remove('video-glow'), 250);
-      }
-
-      confirming = true;
-      $("#codeEdit").value = raw;
-      updateFlightSelectInModal();
-
-      const isDup = allCodesGlobal.has(raw);
-      $("#dupWarn").style.display = isDup ? 'block' : 'none';
-      if(isDup){ try{ soundErr.currentTime = 0; soundErr.play(); }catch{} }
-
-      $("#confirmModal").style.display = "flex";
-      $("#codeEdit").focus();
-      $("#codeEdit").select();
-    });
-
-    const stream = video.srcObject;
-    const tracks = stream ? stream.getVideoTracks() : [];
-    streamTrack = tracks[0];
-    $("#btnTorch").disabled = true;
-
-    if(streamTrack){
-      const caps = streamTrack.getCapabilities ? streamTrack.getCapabilities() : {};
-      if(caps.torch){ $("#btnTorch").disabled = false; }
-
-      const cons = {};
-      if(caps.focusMode && caps.focusMode.includes("continuous")){
-        cons.advanced = [{ focusMode: "continuous" }];
-      }
-      if(Object.keys(cons).length){
-        try{ await streamTrack.applyConstraints(cons); }catch{}
-      }
-
-      video.addEventListener('click', async (ev)=>{
-        const rect = video.getBoundingClientRect();
-        const x = (ev.clientX - rect.left) / rect.width;
-        const y = (ev.clientY - rect.top) / rect.height;
-        if(streamTrack?.applyConstraints){
-          try{ await streamTrack.applyConstraints({ advanced: [{ pointsOfInterest: [{x, y}] }] }); }catch{}
-        }
-      });
-    }
-  }
-
-  // ====== Flujo ======
+  // -----------------------------------------------------------------------
+  // Flujo UI: build flights desde el form
+  // -----------------------------------------------------------------------
   function buildFlightsFromForm(){
     flights = [];
     allCodesGlobal = new Set();
@@ -340,7 +287,7 @@
         id,
         number: num,
         dest,
-        codes: new Set(),
+        codes: [],           // array de {code,specialType}
         babies: 0,
         totalFinal: 0,
         closed: false,
@@ -363,7 +310,6 @@
       return;
     }
 
-    // recordar maletero en localStorage
     try{ localStorage.setItem('scanner_porter', maletero); }catch(e){}
 
     currentFlightId = flights[0].id;
@@ -372,11 +318,13 @@
     $("#form").style.display    = "none";
     $("#scanner").style.display = "block";
 
-    deviceId = $("#cameraSelect").value || deviceId || null;
     renderFlightsPanel();
     actualizarContador();
-    await restartScan();
-    await listarCamaras();
+
+    // En modo USB: preparar input escondido (recién ahora)
+    focusBarcodeInput();
+
+    saveStateToLocal();
   }
 
   function actualizarContador(){
@@ -387,7 +335,7 @@
       return;
     }
     $("#badgeVuelo").textContent = `Vuelo ${f.number}` + (f.dest ? ` (${f.dest})` : '');
-    $("#badgeContador").textContent = `${f.codes.size} valijas`;
+    $("#badgeContador").textContent = `${f.codes.length} valijas`;
   }
 
   function renderResumen(){
@@ -419,22 +367,24 @@
         title.innerHTML = `<b>${f.number}</b>` + (f.dest ? ` (${f.dest})` : '');
         block.appendChild(title);
 
-        const info = document.createElement('div');
-        const bags = f.codes.size;
+        const bags = f.codes.length;
         const babies = f.babies || 0;
         const totalFinal = f.totalFinal || (bags + babies);
+
+        const info = document.createElement('div');
         info.innerHTML = `Bolsas: ${bags} &nbsp; | &nbsp; Babies: ${babies} &nbsp; | &nbsp; Total final: ${totalFinal}`;
         info.style.fontSize = '13px';
         info.style.marginBottom = '4px';
         block.appendChild(info);
 
-        if(f.codes.size){
+        if(f.codes.length){
           const ul = document.createElement('ul');
           ul.style.margin = '0';
           ul.style.paddingLeft = '18px';
-          Array.from(f.codes).forEach(code=>{
+          f.codes.forEach(c=>{
+            const label = c.specialType ? `${c.code} (${c.specialType})` : c.code;
             const li = document.createElement('li');
-            li.textContent = code;
+            li.textContent = label;
             ul.appendChild(li);
           });
           block.appendChild(ul);
@@ -449,35 +399,31 @@
   }
 
   function finalizar(){
+    clearLocalState();
     $("#scanner").style.display = "none";
     $("#resumen").style.display = "block";
     renderResumen();
-    if(reader){ try{ reader.reset(); }catch{} }
+    // limpieza legacy
+    if(reader){ try{ if(reader.reset) reader.reset(); }catch{} }
     if(rafId) cancelAnimationFrame(rafId);
-    octx && octx.clearRect(0,0,overlay.width,overlay.height);
+    if(octx && overlay) octx.clearRect(0,0,overlay.width,overlay.height);
+    stopFocusingBarcodeInput();
   }
 
   function cancelar(){
-    if(reader){ try{ reader.reset(); }catch{} }
+    clearLocalState();
+    if(reader){ try{ if(reader.reset) reader.reset(); }catch{} }
     if(rafId) cancelAnimationFrame(rafId);
+    stopFocusingBarcodeInput();
     location.reload();
-  }
-
-  async function toggleTorch(){
-    if(!streamTrack) return;
-    try{
-      torchOn = !torchOn;
-      await streamTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-      $("#btnTorch").textContent = torchOn ? "Linterna (ON)" : "Linterna";
-    }catch(e){
-      alert("Tu dispositivo no permite controlar la linterna");
-    }
   }
 
   // ====== Modal código ======
   function hideConfirm(){
     $("#confirmModal").style.display = "none";
     confirming = false;
+    // Cuando cierro el modal, recién ahí vuelvo al lector (si estoy en scanner)
+    focusBarcodeInput();
   }
 
   function acceptCode(){
@@ -501,9 +447,17 @@
       return;
     }
 
+    // Equipaje especial
+    const chk = $("#specialCheck");
+    const sel = $("#specialTypeSelect");
+    let specialType = null;
+    if(chk && chk.checked){
+      specialType = sel?.value || "OTRO";
+    }
+
     try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
     allCodesGlobal.add(edited);
-    flight.codes.add(edited);
+    flight.codes.push({ code: edited, specialType });
 
     currentFlightId = flight.id;
     lastFlightId = flight.id;
@@ -511,6 +465,7 @@
     actualizarContador();
     renderFlightsPanel();
     hideConfirm();
+    saveStateToLocal();
   }
 
   function retryCode(){
@@ -519,100 +474,107 @@
   }
 
   // ====== Gestor de códigos por vuelo ======
-function openCodesManagerForFlight(flightId){
-  const flight = getFlightById(flightId);
-  const cont = $("#codesList");
-  const titleEl = $("#codesModalTitle");
+  function openCodesManagerForFlight(flightId){
+    const flight = getFlightById(flightId);
+    const cont = $("#codesList");
+    const titleEl = $("#codesModalTitle");
 
-  cont.innerHTML = "";
-  if(!flight){
-    titleEl.textContent = "Gestor de códigos";
-    const empty = document.createElement('div');
-    empty.className = 'muted';
-    empty.textContent = '(vuelo no encontrado)';
-    cont.appendChild(empty);
-    $("#codesModal").style.display = 'flex';
-    return;
-  }
+    cont.innerHTML = "";
+    if(!flight){
+      titleEl.textContent = "Gestor de códigos";
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = '(vuelo no encontrado)';
+      cont.appendChild(empty);
+      $("#codesModal").style.display = 'flex';
+      return;
+    }
 
-  titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
+    titleEl.textContent = `Códigos vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
 
-  if(flight.codes.size === 0){
-    const empty = document.createElement('div');
-    empty.className = 'muted';
-    empty.textContent = '(sin códigos)';
-    cont.appendChild(empty);
-  } else {
-    Array.from(flight.codes).forEach((code, idx)=>{
-      const row = document.createElement('div');
-      row.className = 'code-item';
+    if(flight.codes.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.textContent = '(sin códigos)';
+      cont.appendChild(empty);
+    } else {
+      flight.codes.forEach((item, idx)=>{
+        const { code, specialType } = item;
+        const label = specialType ? `${code} (${specialType})` : code;
 
-      const left = document.createElement('div');
-      left.innerHTML = `<span>${code}</span> <small>#${idx+1}</small>`;
+        const row = document.createElement('div');
+        row.className = 'code-item';
 
-      // Botón EDITAR (lapiz)
-      const edit = document.createElement('button');
-      edit.className = 'code-edit';
-      edit.textContent = '✏️';
-      edit.title = 'Editar código';
-      edit.addEventListener('click', ()=>{
-        const nuevo = prompt("Editar código escaneado:", code);
-        if(nuevo === null) return; // cancelado
-        const newTrim = (nuevo || "").trim();
-        if(!newTrim){
-          alert("El código no puede quedar vacío.");
-          return;
-        }
-        if(newTrim === code) return;
+        const left = document.createElement('div');
+        left.innerHTML = `<span>${label}</span> <small>#${idx+1}</small>`;
 
-        if(allCodesGlobal.has(newTrim)){
-          alert("Ya existe otro bag con ese código en esta sesión.");
-          if(navigator.vibrate) navigator.vibrate(200);
-          return;
-        }
+        // Editar código (manteniendo tipo especial)
+        const edit = document.createElement('button');
+        edit.className = 'code-edit';
+        edit.textContent = '✏️';
+        edit.title = 'Editar código';
+        edit.addEventListener('click', ()=>{
+          const nuevo = prompt("Editar código escaneado:", code);
+          if(nuevo === null) return;
+          const newTrim = (nuevo || "").trim();
+          if(!newTrim){
+            alert("El código no puede quedar vacío.");
+            return;
+          }
+          if(newTrim === code) return;
 
-        // Actualizar sets
-        flight.codes.delete(code);
-        allCodesGlobal.delete(code);
-        flight.codes.add(newTrim);
-        allCodesGlobal.add(newTrim);
+          if(allCodesGlobal.has(newTrim)){
+            alert("Ya existe otro bag con ese código en esta sesión.");
+            if(navigator.vibrate) navigator.vibrate(200);
+            return;
+          }
 
-        try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+          allCodesGlobal.delete(code);
+          allCodesGlobal.add(newTrim);
+          item.code = newTrim;
 
-        if(currentFlightId === flight.id){
+          try{ soundOk.currentTime = 0; soundOk.play(); }catch{}
+
+          if(currentFlightId === flight.id){
+            actualizarContador();
+          }
+          renderFlightsPanel();
+          openCodesManagerForFlight(flight.id);
+          saveStateToLocal();
+        });
+
+        // Eliminar código
+        const del = document.createElement('button');
+        del.className = 'code-del';
+        del.textContent = '🗑️';
+        del.title = 'Eliminar código';
+        del.addEventListener('click', ()=>{
+          const c1 = confirm(`¿Eliminar el código ${label}?`);
+          if(!c1) return;
+          const c2 = confirm(`Confirmar eliminación definitiva de ${label}?`);
+          if(!c2) return;
+
+          const idxToRemove = flight.codes.indexOf(item);
+          if(idxToRemove >= 0){
+            flight.codes.splice(idxToRemove,1);
+          }
+          allCodesGlobal.delete(code);
+
           actualizarContador();
-        }
-        renderFlightsPanel();
-        openCodesManagerForFlight(flight.id); // refrescar lista
+          renderFlightsPanel();
+          openCodesManagerForFlight(flight.id);
+          saveStateToLocal();
+        });
+
+        row.appendChild(left);
+        row.appendChild(edit);
+        row.appendChild(del);
+        cont.appendChild(row);
       });
+    }
 
-      // Botón ELIMINAR (tacho)
-      const del = document.createElement('button');
-      del.className = 'code-del';
-      del.textContent = '🗑️';
-      del.title = 'Eliminar código';
-      del.addEventListener('click', ()=>{
-        const c1 = confirm(`¿Eliminar el código ${code}?`);
-        if(!c1) return;
-        const c2 = confirm(`Confirmar eliminación definitiva de ${code}?`);
-        if(!c2) return;
-
-        flight.codes.delete(code);
-        allCodesGlobal.delete(code);
-        actualizarContador();
-        renderFlightsPanel();
-        openCodesManagerForFlight(flight.id); // refrescar lista
-      });
-
-      row.appendChild(left);
-      row.appendChild(edit);
-      row.appendChild(del);
-      cont.appendChild(row);
-    });
+    $("#codesModal").style.display = 'flex';
   }
-
-  $("#codesModal").style.display = 'flex';
-}
 
   function openCodesManager(){
     const base = currentFlightId || (flights.find(f=>!f.closed)?.id);
@@ -633,7 +595,7 @@ function openCodesManagerForFlight(flightId){
       alert("Vuelo no encontrado.");
       return;
     }
-    if(flight.codes.size === 0){
+    if(flight.codes.length === 0){
       const ok = confirm("Este vuelo no tiene códigos. ¿Cerrar igual?");
       if(!ok) return;
     }
@@ -643,18 +605,18 @@ function openCodesManagerForFlight(flightId){
     $("#closeFlightTitle").textContent =
       `Cerrar vuelo ${flight.number}` + (flight.dest ? ` (${flight.dest})` : '');
     $("#closeFlightInfo").textContent =
-      `El vuelo tiene ${flight.codes.size} valijas despachadas. Podés sumar babies si corresponde.`;
+      `El vuelo tiene ${flight.codes.length} valijas despachadas. Podés sumar babies si corresponde.`;
 
-    $("#closeFlightBags").textContent = String(flight.codes.size);
+    $("#closeFlightBags").textContent = String(flight.codes.length);
     $("#closeFlightBaby").value = "0";
-    $("#closeFlightTotalFinal").textContent = String(flight.codes.size);
+    $("#closeFlightTotalFinal").textContent = String(flight.codes.length);
 
     $("#closeFlightModal").style.display = 'flex';
   }
 
   function updateCloseFlightTotal(){
     if(!closingFlight) return;
-    const bags = closingFlight.codes.size;
+    const bags = closingFlight.codes.length;
     const babies = parseInt($("#closeFlightBaby").value, 10) || 0;
     const total = bags + babies;
     $("#closeFlightTotalFinal").textContent = String(total);
@@ -665,20 +627,25 @@ function openCodesManagerForFlight(flightId){
       alert("No hay WebApp configurada (editá js/config.js)");
       return false;
     }
+
+    const codesDecorados = flight.codes.map(c =>
+      c.specialType ? `${c.code} (${c.specialType})` : c.code
+    );
+
     const payload = {
       day: $("#dia").value.trim(),
       porter: $("#maletero").value.trim(),
       flight: flight.number,
       destination: flight.dest,
-      totalBags: flight.codes.size,
+      total: flight.codes.length,
+      totalBags: flight.codes.length,
       baby: babies,
       totalFinal: totalFinal,
-      codes: Array.from(flight.codes)
+      codes: codesDecorados
     };
 
     showSavingOverlay();
     try{
-      // Intento CORS
       let ok = false;
       try{
         const res = await fetch(WEBAPP_URL, {
@@ -699,11 +666,10 @@ function openCodesManagerForFlight(flightId){
       }
 
       if(ok){
-        alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.size}, babies: ${babies}, total: ${totalFinal})`);
+        alert(`Vuelo ${flight.number} guardado ✔️ (bags: ${flight.codes.length}, babies: ${babies}, total: ${totalFinal})`);
         return true;
       }
 
-      // Fallback no-CORS
       try{
         await fetch(WEBAPP_URL, {
           method:"POST",
@@ -726,7 +692,7 @@ function openCodesManagerForFlight(flightId){
       $("#closeFlightModal").style.display = 'none';
       return;
     }
-    const bags = closingFlight.codes.size;
+    const bags = closingFlight.codes.length;
     const babies = parseInt($("#closeFlightBaby").value, 10) || 0;
     const totalFinal = bags + babies;
 
@@ -741,6 +707,7 @@ function openCodesManagerForFlight(flightId){
       closingFlight = null;
 
       renderFlightsPanel();
+      saveStateToLocal();
 
       const remaining = flights.filter(f=>!f.closed);
       if(remaining.length){
@@ -771,11 +738,11 @@ function openCodesManagerForFlight(flightId){
 
     const inputNum = document.createElement('input');
     inputNum.className = 'flight-num';
-    inputNum.placeholder = '5240';
+    inputNum.placeholder = '5000';
 
     const inputDest = document.createElement('input');
     inputDest.className = 'flight-dest';
-    inputDest.placeholder = 'BRC';
+    inputDest.placeholder = 'COR';
 
     const btnDel = document.createElement('button');
     btnDel.type = 'button';
@@ -804,19 +771,177 @@ function openCodesManagerForFlight(flightId){
     }catch(e){}
   }
 
-  // ====== Eventos ======
+  // -----------------------------------------------------------------------
+  // Parte 3: Lector USB (input oculto), manejo de escaneos
+  // -----------------------------------------------------------------------
+  function handleScannedCode(raw){
+    const code = String(raw || "").trim();
+    if(!code) return;
+
+    if(confirming) return; // si el modal ya está abierto, ignoramos
+
+    $("#codeEdit").value = code;
+    updateFlightSelectInModal();
+
+    // reset equipaje especial UI
+    const chk = $("#specialCheck");
+    const wrap = $("#specialTypeWrap");
+    const sel  = $("#specialTypeSelect");
+    if(chk) chk.checked = false;
+    if(wrap) wrap.style.display = 'none';
+    if(sel) sel.value = "BABY";
+
+    const isDup = allCodesGlobal.has(code);
+    if($("#dupWarn")) $("#dupWarn").style.display = isDup ? 'block' : 'none';
+    if(isDup){
+      try{ soundErr.currentTime = 0; soundErr.play(); }catch{}
+    }
+
+    confirming = true;
+    $("#confirmModal").style.display = "flex";
+    $("#codeEdit").focus();
+    $("#codeEdit").select();
+  }
+
+  function ensureBarcodeInputExists(){
+    let el = document.getElementById('barcodeInput');
+    if(el) return el;
+
+    el = document.createElement('input');
+    el.type = 'text';
+    el.id = 'barcodeInput';
+    el.autocomplete = 'off';
+    // oculto pero focusable
+    el.style.position = 'absolute';
+    el.style.left = '-9999px';
+    el.style.top = '0';
+    el.style.width = '1px';
+    el.style.height = '1px';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    return el;
+  }
+
+  let keepFocusInterval = null;
+  function focusBarcodeInput(){
+    const inp = ensureBarcodeInputExists();
+    try{ inp.focus({ preventScroll: true }); }catch{ inp.focus(); }
+
+    if(keepFocusInterval) clearInterval(keepFocusInterval);
+    keepFocusInterval = setInterval(()=>{
+      try{
+        const scanner = document.getElementById('scanner');
+        if(!scanner) return;
+
+        const scannerVisible = scanner.style.display !== 'none';
+
+        // Si NO estoy en la pantalla de escaneo o está abierto el modal, no toco el foco
+        if(!scannerVisible || confirming) return;
+
+        if(document.activeElement !== inp) inp.focus();
+      }catch(e){}
+    }, 300);
+  }
+
+  function stopFocusingBarcodeInput(){
+    if(keepFocusInterval){
+      clearInterval(keepFocusInterval);
+      keepFocusInterval = null;
+    }
+  }
+
+  function attachBarcodeListeners(){
+    const inp = ensureBarcodeInputExists();
+
+    // 1) Si el lector manda ENTER al final del código
+    inp.addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter' || e.keyCode === 13){
+        const val = (inp.value || "").trim();
+        inp.value = "";
+        if(val){
+          handleScannedCode(val);
+        }
+        e.preventDefault();
+      }
+    });
+
+    // 2) Si el lector no manda Enter pero “escribe” el código de golpe
+    let scanTimer = null;
+    inp.addEventListener('input', ()=>{
+      if(scanTimer) clearTimeout(scanTimer);
+      scanTimer = setTimeout(()=>{
+        const val = (inp.value || "").trim();
+        if(!val) return;
+
+        const scanner = document.getElementById('scanner');
+        const scannerVisible = scanner && scanner.style.display !== 'none';
+        if(!scannerVisible || confirming) return;
+
+        handleScannedCode(val);
+        inp.value = "";
+      }, 80); // pequeño delay para capturar toda la ráfaga
+    });
+
+    // 3) Click en pantalla de scanner → vuelve el foco al input oculto (si no hay modal)
+    document.addEventListener('click', ()=>{
+      try{
+        const scanner = document.getElementById('scanner');
+        if(!scanner) return;
+        const scannerVisible = scanner.style.display !== 'none';
+
+        if(!scannerVisible || confirming) return;
+
+        if(document.activeElement !== inp){
+          inp.focus();
+        }
+      }catch(e){}
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Toaster simple (no imprescindible, pero está)
+  // -----------------------------------------------------------------------
+  let toastTimer = null;
+  function showToast(msg, cls){
+    const t = document.getElementById('toast');
+    if(!t){
+      const tt = document.createElement('div');
+      tt.id = 'toast';
+      tt.style.position = 'fixed';
+      tt.style.right = '16px';
+      tt.style.bottom = '16px';
+      tt.style.padding = '8px 12px';
+      tt.style.background = '#222';
+      tt.style.color = '#fff';
+      tt.style.borderRadius = '6px';
+      tt.style.boxShadow = '0 6px 18px rgba(0,0,0,0.2)';
+      tt.style.zIndex = 9999;
+      tt.style.opacity = '0';
+      document.body.appendChild(tt);
+    }
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.style.opacity = '1';
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>{ el.style.opacity = '0'; }, 2000);
+  }
+
+  // -----------------------------------------------------------------------
+  // Inicialización y eventos DOMContentLoaded
+  // -----------------------------------------------------------------------
   document.addEventListener('DOMContentLoaded', async ()=>{
     initDateAndPorter();
-
-    // al menos una fila de vuelo
     addFlightRow();
 
+    // UI botones
     $("#btnAddFlightRow").addEventListener('click', addFlightRow);
     $("#btnStart").addEventListener('click', iniciar);
     $("#btnFinish").addEventListener('click', finalizar);
     $("#btnCancel").addEventListener('click', cancelar);
-    $("#btnTorch").addEventListener('click', toggleTorch);
-    $("#btnNew").addEventListener('click', ()=>location.reload());
+    $("#btnNew").addEventListener('click', ()=>{
+      clearLocalState();
+      location.reload();
+    });
 
     $("#btnAccept").addEventListener('click', acceptCode);
     $("#btnRetry").addEventListener('click', retryCode);
@@ -824,21 +949,31 @@ function openCodesManagerForFlight(flightId){
     $("#btnManageCodes")?.addEventListener('click', openCodesManager);
     $("#btnCloseCodes")?.addEventListener('click', closeCodesManager);
 
-    $("#cameraSelectLive").addEventListener('change', async (e)=>{
-      deviceId = e.target.value || null;
-      await restartScan();
-    });
-
     $("#closeFlightBaby").addEventListener('input', updateCloseFlightTotal);
     $("#btnCloseFlightSave").addEventListener('click', onCloseFlightSave);
     $("#btnCloseFlightCancel").addEventListener('click', onCloseFlightCancel);
 
-    // Botón "Guardar en Google Sheet" del resumen ahora solo informa
+    const specialCheck = $("#specialCheck");
+    const specialWrap  = $("#specialTypeWrap");
+    if(specialCheck && specialWrap){
+      specialCheck.addEventListener('change', ()=>{
+        specialWrap.style.display = specialCheck.checked ? 'block' : 'none';
+      });
+    }
+
     $("#btnSave").addEventListener('click', ()=>{
       alert("El guardado se realiza cuando cerrás cada vuelo con el tilde verde. El resumen es solo informativo.");
     });
 
-    try{ await navigator.mediaDevices.getUserMedia({ video: true }); }catch{}
-    await listarCamaras();
+    // Preparar lector USB (listeners)
+    attachBarcodeListeners();
+
+    // Restaurar sesión anterior si existe (si vuelve a scanner, ahí se llama a focusBarcodeInput)
+    await tryRestoreState();
+    // Si no había sesión previa, seguís en el form y el lector NO roba foco.
   });
+
+  // -----------------------------------------------------------------------
+  // Fin del closure
+  // -----------------------------------------------------------------------
 })();
